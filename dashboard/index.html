@@ -1,217 +1,234 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Job Search Command Center | Hassaan Nasir</title>
+  <title>Job Engine | Hassaan Nasir</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="styles.css">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+  <link rel="stylesheet" href="tailor.css">
+  <link rel="stylesheet" href="profiles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%228%22 fill=%22%237c6cff%22/><path d=%22M9 17l5 5 9-12%22 stroke=%22white%22 stroke-width=%223%22 fill=%22none%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>">
 </head>
-<body>
+<body data-builtin="true">
 
-  <div class="app-container">
-    
-    <!-- Top Header -->
-    <header class="app-header">
-      <div class="profile-brand">
-        <div class="profile-avatar">HN</div>
-        <div class="profile-info">
-          <h1>
-            Hassaan Nasir
-            <span class="verified-badge">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-              AI Profile Verified
-            </span>
-          </h1>
-          <div class="profile-subtitle">Senior Full Stack & AI Engineer · Python, Django, React, Next.js, Claude Code</div>
+  <div class="shell">
+
+    <!-- Sidebar (desktop) / bottom bar (mobile) -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>
         </div>
+        <span class="brand-name">Job Engine</span>
       </div>
 
-      <div class="header-actions">
-        <div class="pill-stat">
-          <span>Active Pipeline:</span>
-          <strong id="header-active-count">2</strong>
-        </div>
-        <div class="pill-stat">
-          <span>Fit Target:</span>
-          <strong style="color: #10b981;">&gt;85%</strong>
-        </div>
-        <button class="theme-toggle" id="theme-toggle-btn" title="Toggle Theme" aria-label="Toggle Theme">
-          <span id="theme-icon">☀️</span>
+      <nav class="nav" role="tablist" aria-label="Sections">
+        <span class="nav-label">Workspace</span>
+        <button class="tab-btn active" data-tab="overview" role="tab">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+          <span>Overview</span>
+        </button>
+        <button class="tab-btn" data-tab="search" role="tab">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <span>Search</span>
+        </button>
+        <button class="tab-btn" data-tab="evaluator" role="tab">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>
+          <span>Evaluate</span>
+        </button>
+        <button class="tab-btn" data-tab="kanban" role="tab">
+          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="10" rx="1.5"/><rect x="17" y="4" width="4" height="13" rx="1.5"/></svg>
+          <span>Pipeline</span>
+          <span class="nav-count" id="header-active-count">0</span>
+        </button>
+        <span class="nav-label">Prepare</span>
+        <button class="tab-btn" data-tab="tailor" role="tab">
+          <svg viewBox="0 0 24 24"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>
+          <span>Tailor CV</span>
+        </button>
+        <button class="tab-btn" data-tab="cv-studio" role="tab">
+          <svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
+          <span>CV Studio</span>
+        </button>
+        <button class="tab-btn" data-tab="interview" role="tab">
+          <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>
+          <span>Interview</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="profile" onclick="toggleProfileMenu(this)" aria-haspopup="menu" title="Switch or view profile">
+          <div class="avatar" id="side-avatar">HN</div>
+          <div class="profile-text">
+            <div class="profile-name" id="side-name">Hassaan Nasir</div>
+            <div class="profile-role" id="side-role">Senior Full Stack &amp; AI Engineer</div>
+          </div>
+          <svg class="profile-chevron" viewBox="0 0 24 24"><path d="M8 10l4-4 4 4M8 14l4 4 4-4"/></svg>
         </button>
       </div>
-    </header>
+    </aside>
 
-    <!-- Navigation Tabs -->
-    <nav class="nav-tabs" role="tablist">
-      <button class="tab-btn active" data-tab="overview" role="tab">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-        Overview & Metrics
-      </button>
-      <button class="tab-btn" data-tab="search" role="tab">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-        Live Job Search Hub
-      </button>
-      <button class="tab-btn" data-tab="evaluator" role="tab">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
-        AI Fit Evaluator
-      </button>
-      <button class="tab-btn" data-tab="kanban" role="tab">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h7"></path></svg>
-        Application Pipeline (Kanban)
-      </button>
-      <button class="tab-btn" data-tab="cv-studio" role="tab">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-        CV & Template Studio
-      </button>
-      <button class="tab-btn" data-tab="interview" role="tab">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
-        STAR Interview Lab
-      </button>
-    </nav>
+    <!-- Main -->
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 class="page-title" id="page-title">Overview</h1>
+          <p class="page-subtitle" id="page-subtitle">Your job search at a glance.</p>
+        </div>
+        <div class="topbar-actions">
+          <button class="icon-btn" id="theme-toggle-btn" title="Toggle theme" aria-label="Toggle theme">
+            <svg class="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+            <svg class="icon-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+          </button>
+          <button class="btn btn-primary" onclick="openAddJobModal()">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            <span>Add application</span>
+          </button>
+          <button class="avatar avatar-btn" id="top-avatar" onclick="toggleProfileMenu(this)" aria-label="Switch or view profile">HN</button>
+        </div>
+      </header>
 
-    <!-- TAB 1: Overview & Metrics -->
-    <section id="tab-overview" class="tab-content active">
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-content">
-            <span class="stat-label">Total Applications Tracked</span>
+      <!-- TAB 1: Overview -->
+      <section id="tab-overview" class="tab-content active">
+        <div class="stats-grid">
+          <div class="card stat">
+            <div class="stat-head">
+              <span class="stat-label">Total tracked</span>
+              <span class="stat-icon"><svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l4-4 3 3 5-6"/></svg></span>
+            </div>
             <div class="stat-value" id="stat-total">0</div>
-            <span class="stat-trend">Synced with CSV</span>
+            <span class="stat-sub">All applications</span>
           </div>
-          <div class="stat-icon">📈</div>
-        </div>
-
-        <div class="stat-card blue">
-          <div class="stat-content">
-            <span class="stat-label">Active in Process</span>
+          <div class="card stat">
+            <div class="stat-head">
+              <span class="stat-label">In progress</span>
+              <span class="stat-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+            </div>
             <div class="stat-value" id="stat-active">0</div>
-            <span class="stat-trend" style="color: var(--status-applied);">In review & screening</span>
+            <span class="stat-sub">Applied or interviewing</span>
           </div>
-          <div class="stat-icon">⚡</div>
-        </div>
-
-        <div class="stat-card amber">
-          <div class="stat-content">
-            <span class="stat-label">Interviews Scheduled</span>
+          <div class="card stat">
+            <div class="stat-head">
+              <span class="stat-label">Interviews</span>
+              <span class="stat-icon"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></span>
+            </div>
             <div class="stat-value" id="stat-interview">0</div>
-            <span class="stat-trend" style="color: var(--status-interview);">High engagement</span>
+            <span class="stat-sub">Currently scheduled</span>
           </div>
-          <div class="stat-icon">🎙️</div>
-        </div>
-
-        <div class="stat-card green">
-          <div class="stat-content">
-            <span class="stat-label">Avg. Technical Fit</span>
-            <div class="stat-value" id="stat-avg-fit">92%</div>
-            <span class="stat-trend" style="color: var(--status-hired);">High match rate</span>
-          </div>
-          <div class="stat-icon">🎯</div>
-        </div>
-      </div>
-
-      <!-- Quick Action Strip -->
-      <div class="action-strip">
-        <div class="action-strip-text">
-          <h3>Ready to discover new high-fit engineering roles?</h3>
-          <p>Scan 50+ ATS platforms and LinkedIn with your personalized candidate profile.</p>
-        </div>
-        <div style="display: flex; gap: 12px;">
-          <button class="btn-primary" onclick="switchTab('search')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-            Search Live Jobs
-          </button>
-          <button class="btn-secondary" onclick="openAddJobModal()">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-            Add Application
-          </button>
-        </div>
-      </div>
-
-      <!-- Charts Grid -->
-      <div class="charts-grid">
-        <div class="chart-card">
-          <div class="chart-header">
-            <div class="chart-title">
-              <span>📊</span> Application Pipeline Funnel
+          <div class="card stat">
+            <div class="stat-head">
+              <span class="stat-label">Average fit</span>
+              <span class="stat-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg></span>
             </div>
-            <span class="badge-count" id="funnel-badge">Conversion rate</span>
-          </div>
-          <div class="chart-svg-container" id="funnel-chart-box">
-            <!-- Dynamic SVG Chart injected here -->
+            <div class="stat-value" id="stat-avg-fit">0%</div>
+            <span class="stat-sub">Across tracked roles</span>
           </div>
         </div>
 
-        <div class="chart-card">
-          <div class="chart-header">
-            <div class="chart-title">
-              <span>🥧</span> Status Distribution
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head">
+              <h2 class="card-title">Pipeline funnel</h2>
+              <span class="chip" id="funnel-badge">—</span>
             </div>
-            <span class="badge-count" id="doughnut-badge">Live Breakdown</span>
+            <div id="funnel-chart-box"></div>
           </div>
-          <div class="chart-svg-container" id="doughnut-chart-box">
-            <!-- Dynamic SVG Doughnut injected here -->
+          <div class="card">
+            <div class="card-head">
+              <h2 class="card-title">Status breakdown</h2>
+              <span class="chip" id="doughnut-badge">Live</span>
+            </div>
+            <div id="doughnut-chart-box"></div>
           </div>
         </div>
-      </div>
-    </section>
 
-    <!-- TAB 2: Live Job Search Hub -->
-    <section id="tab-search" class="tab-content">
-      <div class="search-controls">
-        <div class="search-input-group">
-          <span class="search-icon-inside">🔍</span>
-          <input type="text" id="search-query-input" placeholder="Role keyword (e.g. Senior Full Stack, AI Engineer, Python)..." value="Senior Full Stack Engineer">
+        <div class="grid-2 grid-2-wide">
+          <div class="card">
+            <div class="card-head">
+              <h2 class="card-title">Recent applications</h2>
+              <button class="btn-link" onclick="switchTab('kanban')">View pipeline →</button>
+            </div>
+            <div id="recent-list" class="recent-list"></div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <h2 class="card-title">Quick actions</h2>
+            </div>
+            <div class="quick-actions">
+              <button class="quick-action" onclick="switchTab('search')">
+                <span class="qa-icon"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></span>
+                <span><strong>Find jobs</strong><small>Search job boards for matching roles</small></span>
+              </button>
+              <button class="quick-action" onclick="switchTab('evaluator')">
+                <span class="qa-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg></span>
+                <span><strong>Score a posting</strong><small>Paste a job description to check fit</small></span>
+              </button>
+              <button class="quick-action" onclick="openAddJobModal()">
+                <span class="qa-icon"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>
+                <span><strong>Log an application</strong><small>Add a role to your pipeline</small></span>
+              </button>
+            </div>
+          </div>
         </div>
-        
-        <select class="filter-select" id="search-portal-select">
-          <option value="freehire">Freehire (50+ ATS Aggregators: Greenhouse, Lever, Ashby)</option>
-          <option value="linkedin">LinkedIn Public Guest Portal</option>
-        </select>
+      </section>
 
-        <select class="filter-select" id="search-location-select">
-          <option value="Remote">Remote / Global</option>
-          <option value="United Arab Emirates">United Arab Emirates / Dubai</option>
-          <option value="United States">United States</option>
-          <option value="Europe">Europe</option>
-        </select>
+      <!-- TAB 2: Search -->
+      <section id="tab-search" class="tab-content">
+        <div class="card search-bar">
+          <label class="input-icon">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            <input type="text" id="search-query-input" class="input" placeholder="Role or keyword, e.g. AI Engineer" value="Senior Full Stack Engineer">
+          </label>
+          <select class="input select" id="search-portal-select" aria-label="Job board">
+            <option value="freehire">Freehire (Greenhouse, Lever, Ashby…)</option>
+            <option value="linkedin">LinkedIn</option>
+          </select>
+          <select class="input select" id="search-location-select" aria-label="Region">
+            <option value="Worldwide">Worldwide</option>
+            <option value="APAC">APAC – Asia-Pacific</option>
+            <option value="APJ">APJ – Asia-Pacific &amp; Japan</option>
+            <option value="MENA">MENA – Middle East &amp; North Africa</option>
+            <option value="EMEA">EMEA – Europe, Middle East &amp; Africa</option>
+            <option value="NAMER">NAMER – North America</option>
+          </select>
+          <label class="switch search-remote">
+            <input type="checkbox" id="search-remote-only">
+            <span class="switch-track"></span>
+            Remote only
+          </label>
+          <button class="btn btn-primary" id="btn-run-search" onclick="executeJobSearch()">
+            <span>Search</span>
+          </button>
+        </div>
 
-        <button class="btn-primary" id="btn-run-search" onclick="executeJobSearch()">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-          Search Jobs
-        </button>
-      </div>
+        <div id="search-status-bar" class="notice" hidden></div>
 
-      <div id="search-status-bar" style="margin-bottom: 16px; font-size: 13px; color: var(--text-secondary); display: none;"></div>
+        <div class="job-grid" id="job-results-container"></div>
+      </section>
 
-      <div class="job-results-grid" id="job-results-container">
-        <!-- Live jobs populated dynamically -->
-      </div>
-    </section>
-
-    <!-- TAB 3: AI Fit Evaluator -->
-    <section id="tab-evaluator" class="tab-content">
-      <div class="evaluator-layout">
-        <!-- Form Left -->
-        <div class="evaluator-form-card">
-          <h2 style="font-family: 'Outfit', sans-serif; font-size: 18px; margin-bottom: 6px;">Evaluate Job Posting Match</h2>
-          <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 20px;">
-            Paste any job description to run a 5-dimension AI fit evaluation against Hassaan Nasir's profile.
-          </p>
-
-          <div class="form-group">
-            <label for="eval-job-title">Job Title</label>
-            <input type="text" id="eval-job-title" placeholder="e.g. Senior Full Stack Engineer / AI Specialist" value="Senior Full Stack AI Engineer">
-          </div>
-
-          <div class="form-group">
-            <label for="eval-company-name">Company Name</label>
-            <input type="text" id="eval-company-name" placeholder="e.g. Anthropic, Deployly, OpenAI" value="Deployly AI">
-          </div>
-
-          <div class="form-group">
-            <label for="eval-job-desc">Job Description & Requirements</label>
-            <textarea id="eval-job-desc" placeholder="Paste full job description text or requirements here...">We are looking for a Senior Full Stack Engineer to lead our core AI platform. 
+      <!-- TAB 3: Evaluator -->
+      <section id="tab-evaluator" class="tab-content">
+        <div class="eval-layout">
+          <div class="card">
+            <div class="card-head">
+              <h2 class="card-title">Job posting</h2>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="eval-job-title">Job title</label>
+                <input type="text" id="eval-job-title" class="input" placeholder="e.g. Senior Full Stack Engineer" value="Senior Full Stack AI Engineer">
+              </div>
+              <div class="field">
+                <label for="eval-company-name">Company</label>
+                <input type="text" id="eval-company-name" class="input" placeholder="e.g. Deployly AI" value="Deployly AI">
+              </div>
+            </div>
+            <div class="field">
+              <label for="eval-job-desc">Description &amp; requirements</label>
+              <textarea id="eval-job-desc" class="input" placeholder="Paste the full job description here…">We are looking for a Senior Full Stack Engineer to lead our core AI platform.
 
 Requirements:
 - 5+ years of experience with Python, Django, DRF, or FastAPI
@@ -221,188 +238,221 @@ Requirements:
 - Familiarity with LLM integration (Claude Code, OpenAI, LangChain, MCP)
 - Cloud deployment with Docker, Kubernetes, and AWS CI/CD pipelines
 - Strong focus on observability (Sentry, Datadog) and clean code architecture</textarea>
+            </div>
+            <button class="btn btn-primary btn-block" onclick="runFitEvaluation()">Calculate fit score</button>
           </div>
 
-          <button class="btn-primary" style="width: 100%; justify-content: center;" onclick="runFitEvaluation()">
-            <span>⚡</span> Calculate Instant 5D Fit Score
+          <div class="card" id="evaluator-results-box">
+            <div class="score-hero">
+              <div class="score-ring good" id="eval-score-ring" style="--score: 94">
+                <div class="score-ring-inner">
+                  <span class="num" id="eval-overall-score">94</span>
+                  <span class="denom">/ 100</span>
+                </div>
+              </div>
+              <div class="verdict" id="eval-verdict-text">Exceptional Match</div>
+              <p class="muted-sm">Keyword match across five dimensions</p>
+            </div>
+
+            <div class="dims">
+              <div class="dim"><span>Technical skills</span><div class="bar"><div class="bar-fill" id="bar-tech" style="width: 96%"></div></div><strong id="val-tech">96</strong></div>
+              <div class="dim"><span>Experience level</span><div class="bar"><div class="bar-fill" id="bar-exp" style="width: 95%"></div></div><strong id="val-exp">95</strong></div>
+              <div class="dim"><span>Behavioral &amp; culture</span><div class="bar"><div class="bar-fill" id="bar-beh" style="width: 94%"></div></div><strong id="val-beh">94</strong></div>
+              <div class="dim"><span>Location / remote</span><div class="bar"><div class="bar-fill bar-ok" id="bar-loc" style="width: 100%"></div></div><strong id="val-loc">Pass</strong></div>
+              <div class="dim"><span>Career alignment</span><div class="bar"><div class="bar-fill" id="bar-car" style="width: 92%"></div></div><strong id="val-car">92</strong></div>
+            </div>
+
+            <div class="strengths">
+              <h3>Key strengths</h3>
+              <ul id="eval-strengths-list">
+                <li>8+ years deep expertise in Python, Django REST Framework, PostgreSQL, and Next.js.</li>
+                <li>Quantified track record: 38% API speedup, 55% task completion speedup.</li>
+                <li>Certified in Anthropic Model Context Protocol (MCP) &amp; Claude Code.</li>
+              </ul>
+            </div>
+
+            <div class="btn-row">
+              <button class="btn btn-primary" onclick="saveEvaluatedJobToPipeline()">Save to pipeline</button>
+              <button class="btn btn-secondary" onclick="switchTab('cv-studio')">Open CV Studio</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: Pipeline -->
+      <section id="tab-kanban" class="tab-content">
+        <div class="toolbar">
+          <p class="muted">Drag cards between columns to update their status.</p>
+          <button class="btn btn-secondary" onclick="exportTrackerCSV()">
+            <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>
+            <span>Export CSV</span>
           </button>
         </div>
 
-        <!-- Results Right -->
-        <div class="evaluator-results-card" id="evaluator-results-box">
-          <div class="score-hero">
-            <div class="score-badge-circle">
-              <span class="num" id="eval-overall-score">94</span>
-              <span class="denom">/ 100</span>
+        <div class="kanban-board">
+          <div class="kanban-col" data-status="drafted" ondragover="allowDrop(event)" ondragleave="leaveDrop(event)" ondrop="handleDrop(event, 'drafted')">
+            <div class="kanban-col-header"><span class="col-title"><i class="dot" style="--c: var(--st-drafted)"></i>Drafted</span><span class="count" id="count-drafted">0</span></div>
+            <div class="kanban-cards" id="cards-drafted"></div>
+          </div>
+          <div class="kanban-col" data-status="applied" ondragover="allowDrop(event)" ondragleave="leaveDrop(event)" ondrop="handleDrop(event, 'applied')">
+            <div class="kanban-col-header"><span class="col-title"><i class="dot" style="--c: var(--st-applied)"></i>Applied</span><span class="count" id="count-applied">0</span></div>
+            <div class="kanban-cards" id="cards-applied"></div>
+          </div>
+          <div class="kanban-col" data-status="interview" ondragover="allowDrop(event)" ondragleave="leaveDrop(event)" ondrop="handleDrop(event, 'interview')">
+            <div class="kanban-col-header"><span class="col-title"><i class="dot" style="--c: var(--st-interview)"></i>Interview</span><span class="count" id="count-interview">0</span></div>
+            <div class="kanban-cards" id="cards-interview"></div>
+          </div>
+          <div class="kanban-col" data-status="offer" ondragover="allowDrop(event)" ondragleave="leaveDrop(event)" ondrop="handleDrop(event, 'offer')">
+            <div class="kanban-col-header"><span class="col-title"><i class="dot" style="--c: var(--st-offer)"></i>Offer</span><span class="count" id="count-offer">0</span></div>
+            <div class="kanban-cards" id="cards-offer"></div>
+          </div>
+          <div class="kanban-col" data-status="rejected" ondragover="allowDrop(event)" ondragleave="leaveDrop(event)" ondrop="handleDrop(event, 'rejected')">
+            <div class="kanban-col-header"><span class="col-title"><i class="dot" style="--c: var(--st-closed)"></i>Closed</span><span class="count" id="count-rejected">0</span></div>
+            <div class="kanban-cards" id="cards-rejected"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tailor CV -->
+      <section id="tab-tailor" class="tab-content">
+        <div class="tailor-layout">
+          <div class="tailor-side">
+            <div class="card">
+              <div class="card-head">
+                <h2 class="card-title">Job details</h2>
+                <button class="btn-link" onclick="importFromEvaluator()">Import from Evaluate</button>
+              </div>
+              <div class="form-row">
+                <div class="field">
+                  <label for="tailor-title">Job title</label>
+                  <input type="text" id="tailor-title" class="input" placeholder="e.g. AI Full Stack Engineer">
+                </div>
+                <div class="field">
+                  <label for="tailor-company">Company</label>
+                  <input type="text" id="tailor-company" class="input" placeholder="e.g. Acme AI">
+                </div>
+              </div>
+              <div class="field">
+                <label for="tailor-desc">Job description</label>
+                <textarea id="tailor-desc" class="input" placeholder="Paste the full job description, including requirements…"></textarea>
+              </div>
+              <button class="btn btn-primary btn-block" id="tailor-run" onclick="runTailor()">Tailor my CV</button>
+              <p class="tailor-note">
+                <svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
+                Uses only facts from your profile. Nothing is invented.
+              </p>
             </div>
-            <div class="verdict-title" id="eval-verdict-text" style="color: var(--status-hired);">Exceptional Match</div>
-            <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Direct 8+ years alignment across all primary tech requirements</p>
-          </div>
 
-          <div class="score-breakdown-list">
-            <div class="score-dim-row">
-              <span style="font-weight: 600; width: 140px;">Technical Skills</span>
-              <div class="score-bar-bg"><div class="score-bar-fill" id="bar-tech" style="width: 96%;"></div></div>
-              <strong id="val-tech">96/100</strong>
-            </div>
-            <div class="score-dim-row">
-              <span style="font-weight: 600; width: 140px;">Experience Level</span>
-              <div class="score-bar-bg"><div class="score-bar-fill" id="bar-exp" style="width: 95%;"></div></div>
-              <strong id="val-exp">95/100</strong>
-            </div>
-            <div class="score-dim-row">
-              <span style="font-weight: 600; width: 140px;">Behavioral & Culture</span>
-              <div class="score-bar-bg"><div class="score-bar-fill" id="bar-beh" style="width: 94%;"></div></div>
-              <strong id="val-beh">94/100</strong>
-            </div>
-            <div class="score-dim-row">
-              <span style="font-weight: 600; width: 140px;">Location / Remote</span>
-              <div class="score-bar-bg"><div class="score-bar-fill" id="bar-loc" style="width: 100%; background: #10b981;"></div></div>
-              <strong id="val-loc">PASS</strong>
-            </div>
-            <div class="score-dim-row">
-              <span style="font-weight: 600; width: 140px;">Career Alignment</span>
-              <div class="score-bar-bg"><div class="score-bar-fill" id="bar-car" style="width: 92%;"></div></div>
-              <strong id="val-car">92/100</strong>
+            <div id="tailor-analysis" hidden>
+              <div class="card">
+                <div class="tailor-score-row">
+                  <div class="score-ring score-ring-sm" id="tailor-score" style="--score: 0">
+                    <div class="score-ring-inner"><span class="num" id="tailor-score-num">0%</span></div>
+                  </div>
+                  <div>
+                    <h2 class="card-title">Requirement match</h2>
+                    <p class="muted" id="tailor-score-text"></p>
+                  </div>
+                </div>
+
+                <h3 class="tailor-sub">Covered in your CV</h3>
+                <div class="req-chips" id="tailor-matched"></div>
+
+                <div id="tailor-gap-block" hidden>
+                  <h3 class="tailor-sub">Not in your profile</h3>
+                  <div class="req-chips" id="tailor-missing"></div>
+                  <p class="tailor-hint">These weren't added to your CV. If you do have this experience, add it to your profile and tailor again. If not, mention related experience in your cover letter.</p>
+                </div>
+              </div>
+
+              <div class="card">
+                <h2 class="card-title tailor-changes-title">What changed</h2>
+                <ul class="tailor-changes" id="tailor-changes"></ul>
+              </div>
             </div>
           </div>
 
-          <div style="margin-top: 20px;">
-            <h4 style="font-size: 13px; font-weight: 700; color: var(--text-primary); margin-bottom: 8px;">Key Strengths:</h4>
-            <ul id="eval-strengths-list" style="font-size: 12px; color: var(--text-secondary); padding-left: 18px; line-height: 1.6;">
-              <li>8+ years deep expertise in Python, Django REST Framework, PostgreSQL, and Next.js.</li>
-              <li>Quantified track record: 38% API speedup, 55% task completion speedup.</li>
-              <li>Certified in Anthropic Model Context Protocol (MCP) & Claude Code.</li>
-            </ul>
-          </div>
-
-          <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-subtle); display: flex; gap: 10px;">
-            <button class="btn-primary" style="flex: 1; font-size: 13px;" onclick="saveEvaluatedJobToPipeline()">
-              ➕ Save to Pipeline
-            </button>
-            <button class="btn-secondary" style="font-size: 13px;" onclick="switchTab('cv-studio')">
-              📄 Tailor CV
-            </button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 4: Application Pipeline (Kanban) -->
-    <section id="tab-kanban" class="tab-content">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
-        <div>
-          <h2 style="font-family: 'Outfit', sans-serif; font-size: 18px;">Application Pipeline Tracker</h2>
-          <p style="font-size: 13px; color: var(--text-secondary);">Drag & drop or click cards to update application progress.</p>
-        </div>
-        <div style="display: flex; gap: 10px;">
-          <button class="btn-secondary" onclick="exportTrackerCSV()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-            Export CSV
-          </button>
-          <button class="btn-primary" onclick="openAddJobModal()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-            Add Application
-          </button>
-        </div>
-      </div>
-
-      <div class="kanban-board">
-        <!-- Drafted -->
-        <div class="kanban-col" data-status="drafted" ondragover="allowDrop(event)" ondrop="handleDrop(event, 'drafted')">
-          <div class="kanban-col-header">
-            <span class="kanban-col-title">
-              <span style="color: var(--status-drafted);">●</span> Drafted
-            </span>
-            <span class="badge-count" id="count-drafted">0</span>
-          </div>
-          <div class="kanban-cards" id="cards-drafted"></div>
-        </div>
-
-        <!-- Applied -->
-        <div class="kanban-col" data-status="applied" ondragover="allowDrop(event)" ondrop="handleDrop(event, 'applied')">
-          <div class="kanban-col-header">
-            <span class="kanban-col-title">
-              <span style="color: var(--status-applied);">●</span> Applied (Active)
-            </span>
-            <span class="badge-count" id="count-applied">0</span>
-          </div>
-          <div class="kanban-cards" id="cards-applied"></div>
-        </div>
-
-        <!-- Interview -->
-        <div class="kanban-col" data-status="interview" ondragover="allowDrop(event)" ondrop="handleDrop(event, 'interview')">
-          <div class="kanban-col-header">
-            <span class="kanban-col-title">
-              <span style="color: var(--status-interview);">●</span> Interview Stages
-            </span>
-            <span class="badge-count" id="count-interview">0</span>
-          </div>
-          <div class="kanban-cards" id="cards-interview"></div>
-        </div>
-
-        <!-- Offer -->
-        <div class="kanban-col" data-status="offer" ondragover="allowDrop(event)" ondrop="handleDrop(event, 'offer')">
-          <div class="kanban-col-header">
-            <span class="kanban-col-title">
-              <span style="color: var(--status-offer);">●</span> Offer
-            </span>
-            <span class="badge-count" id="count-offer">0</span>
-          </div>
-          <div class="kanban-cards" id="cards-offer"></div>
-        </div>
-
-        <!-- Closed / Rejected -->
-        <div class="kanban-col" data-status="rejected" ondragover="allowDrop(event)" ondrop="handleDrop(event, 'rejected')">
-          <div class="kanban-col-header">
-            <span class="kanban-col-title">
-              <span style="color: var(--status-rejected);">●</span> Closed / Rejected
-            </span>
-            <span class="badge-count" id="count-rejected">0</span>
-          </div>
-          <div class="kanban-cards" id="cards-rejected"></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 5: CV & Template Studio -->
-    <section id="tab-cv-studio" class="tab-content">
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
-        <!-- Left: Elevator Pitches -->
-        <div class="chart-card">
-          <h3 style="font-family: 'Outfit', sans-serif; font-size: 17px; margin-bottom: 12px;">Tailored Profile Statements</h3>
-          <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
-            Targeted elevator pitches prepared for your specific application directions.
-          </p>
-
-          <div style="background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px; margin-bottom: 14px;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-              <strong style="font-size: 13px; color: var(--accent-primary);">1. Senior Full Stack & Backend Roles</strong>
-              <button class="btn-text" onclick="copyText('pitch-1')">Copy</button>
+          <div class="tailor-main">
+            <div class="card tailor-empty" id="tailor-empty">
+              <div class="tailor-empty-icon">
+                <svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
+              </div>
+              <h2>Your tailored CV will appear here</h2>
+              <ol class="tailor-steps">
+                <li><span>1</span>Paste the job description</li>
+                <li><span>2</span>Click <strong>Tailor my CV</strong></li>
+                <li><span>3</span>Review the changes, then download a PDF</li>
+              </ol>
             </div>
-            <p id="pitch-1" style="font-size: 13px; color: var(--text-secondary); line-height: 1.6;">
-              Senior Full Stack Engineer with 8+ years of experience designing and scaling distributed web applications using Python, Django, React, Next.js, TypeScript, and PostgreSQL. Proven track record of reducing API response times by 38%, cutting async pipeline runtimes by 55%, and driving comprehensive observability with Datadog and Sentry. Experienced in cloud-native containerized deployments across AWS and Kubernetes.
-            </p>
-          </div>
 
-          <div style="background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-              <strong style="font-size: 13px; color: var(--status-hired);">2. AI & LLM Application Engineer Roles</strong>
-              <button class="btn-text" onclick="copyText('pitch-2')">Copy</button>
+            <div id="tailor-preview" hidden>
+              <div class="card tailor-toolbar">
+                <div class="tailor-toolbar-left">
+                  <span class="mono-tag" id="tailor-file"></span>
+                  <label class="switch">
+                    <input type="checkbox" id="tailor-highlight" checked onchange="renderTailorPreview()">
+                    <span class="switch-track"></span>
+                    Highlight matches
+                  </label>
+                </div>
+                <div class="tailor-actions">
+                  <button class="btn btn-secondary" onclick="copyTailoredText()">Copy text</button>
+                  <button class="btn btn-secondary" onclick="downloadTailoredTex()">Download .tex</button>
+                  <button class="btn btn-secondary" onclick="saveTailoredToProject()">Save to cv/</button>
+                  <button class="btn btn-primary" onclick="downloadTailoredPdf()">
+                    <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>
+                    <span>Download PDF</span>
+                  </button>
+                </div>
+              </div>
+              <div class="paper">
+                <iframe id="tailor-frame" title="Tailored CV preview"></iframe>
+              </div>
             </div>
-            <p id="pitch-2" style="font-size: 13px; color: var(--text-secondary); line-height: 1.6;">
-              Senior Full Stack & AI Engineer specializing in productionizing LLMs, agentic workflows (LangChain, LangGraph, Claude Code, Model Context Protocol), and scalable backend architectures. Combines 8+ years of robust Python/TypeScript distributed systems experience with cutting-edge AI workflow automation and vector search integration to deliver resilient, high-throughput intelligent systems.
-            </p>
           </div>
         </div>
+      </section>
 
-        <!-- Right: Master LaTeX CV Preview -->
-        <div class="chart-card">
-          <div class="chart-header">
-            <h3 style="font-family: 'Outfit', sans-serif; font-size: 17px;">Master LaTeX CV Source (`main_example.tex`)</h3>
-            <button class="btn-text" onclick="copyText('latex-cv-code')">Copy LaTeX</button>
+      <!-- TAB 5: CV Studio -->
+      <section id="tab-cv-studio" class="tab-content">
+        <div class="card custom-only profile-placeholder">
+          <h2 class="card-title">CV Studio for <span class="profile-custom-name"></span></h2>
+          <p class="muted">Ready-made statements and the master CV are set up for the main profile only. For this profile, fill in the profile and use <strong>Tailor CV</strong> to build a CV for each job.</p>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="switchTab('tailor')">Open Tailor CV</button>
+            <button class="btn btn-secondary" onclick="openProfileEditor()">Edit profile</button>
           </div>
-          <pre id="latex-cv-code" style="background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #a5b4fc; max-height: 420px; overflow-y: auto; line-height: 1.5;">\documentclass[11pt,a4paper,sans]{moderncv}
+        </div>
+        <div class="grid-2 builtin-only">
+          <div class="card">
+            <div class="card-head">
+              <h2 class="card-title">Profile statements</h2>
+            </div>
+            <p class="muted card-lead">Ready-made summaries for the two role directions you're targeting.</p>
+
+            <div class="panel">
+              <div class="panel-head">
+                <strong>Senior Full Stack &amp; Backend</strong>
+                <button class="btn-link" onclick="copyText('pitch-1')">Copy</button>
+              </div>
+              <p id="pitch-1">Senior Full Stack Engineer with 8+ years of experience designing and scaling distributed web applications using Python, Django, React, Next.js, TypeScript, and PostgreSQL. Proven track record of reducing API response times by 38%, cutting async pipeline runtimes by 55%, and driving comprehensive observability with Datadog and Sentry. Experienced in cloud-native containerized deployments across AWS and Kubernetes.</p>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head">
+                <strong>AI &amp; LLM Application Engineer</strong>
+                <button class="btn-link" onclick="copyText('pitch-2')">Copy</button>
+              </div>
+              <p id="pitch-2">Senior Full Stack &amp; AI Engineer specializing in productionizing LLMs, agentic workflows (LangChain, LangGraph, Claude Code, Model Context Protocol), and scalable backend architectures. Combines 8+ years of robust Python/TypeScript distributed systems experience with cutting-edge AI workflow automation and vector search integration to deliver resilient, high-throughput intelligent systems.</p>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h2 class="card-title">Master CV <span class="mono-tag">main_example.tex</span></h2>
+              <button class="btn-link" onclick="copyText('latex-cv-code')">Copy LaTeX</button>
+            </div>
+            <pre id="latex-cv-code" class="code">\documentclass[11pt,a4paper,sans]{moderncv}
 \moderncvstyle{banking}
 \moderncvcolor{blue}
 
@@ -431,142 +481,154 @@ Requirements:
   \end{itemize}
 }}
 \end{document}</pre>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- TAB 6: STAR Interview Lab -->
-    <section id="tab-interview" class="tab-content">
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
-        <!-- Left: Ready-Made STAR Stories -->
-        <div class="chart-card">
-          <h3 style="font-family: 'Outfit', sans-serif; font-size: 17px; margin-bottom: 8px;">Proven STAR Interview Answers</h3>
-          <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
-            Quantified achievements mapped directly to standard behavioral and technical questions.
-          </p>
+      <!-- TAB 6: Interview -->
+      <section id="tab-interview" class="tab-content">
+        <div class="card custom-only profile-placeholder">
+          <h2 class="card-title">Interview prep for <span class="profile-custom-name"></span></h2>
+          <p class="muted">STAR stories and prepared answers are set up for the main profile only. Add this person's achievements to their profile, then use <code>/interview</code> in Claude Code for full interview preparation.</p>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="openProfileEditor()">Edit profile</button>
+          </div>
+        </div>
+        <div class="grid-2 builtin-only">
+          <div class="card">
+            <div class="card-head">
+              <h2 class="card-title">STAR stories</h2>
+            </div>
+            <p class="muted card-lead">Quantified achievements mapped to common behavioral and technical questions.</p>
 
-          <div style="display: flex; flex-direction: column; gap: 14px;">
-            <div style="background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px;">
-              <h4 style="font-size: 14px; color: var(--accent-primary); margin-bottom: 6px;">
-                1. System Performance & Concurrency (Tags Solutions)
-              </h4>
-              <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
-                <strong>Situation:</strong> High request load was causing latency degradation.<br>
-                <strong>Task:</strong> Redesign backend architectures and async task execution.<br>
-                <strong>Action:</strong> Implemented Django REST Framework with Celery/Redis queueing and PostgreSQL indexing refactors.<br>
-                <strong>Result:</strong> 38% faster API response times, 55% reduction in background task duration, and 47% lower DB latency.
-              </p>
+            <div class="panel">
+              <div class="panel-head"><strong>System performance &amp; concurrency</strong><span class="chip">Tags Solutions</span></div>
+              <dl class="star">
+                <dt>Situation</dt><dd>High request load was causing latency degradation.</dd>
+                <dt>Task</dt><dd>Redesign backend architectures and async task execution.</dd>
+                <dt>Action</dt><dd>Implemented Django REST Framework with Celery/Redis queueing and PostgreSQL indexing refactors.</dd>
+                <dt>Result</dt><dd>38% faster API response times, 55% reduction in background task duration, and 47% lower DB latency.</dd>
+              </dl>
             </div>
 
-            <div style="background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px;">
-              <h4 style="font-size: 14px; color: var(--status-applied); margin-bottom: 6px;">
-                2. Real-Time Collaboration & Concurrency (Turing)
-              </h4>
-              <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
-                <strong>Situation:</strong> Scaling chat & collaboration tools for 10,000+ concurrent active users.<br>
-                <strong>Task:</strong> Ensure zero-downtime releases and resilient UI state synchronization.<br>
-                <strong>Action:</strong> Engineered React/TypeScript plugin architecture and automated CI/CD test suites with Jest & Cypress achieving 90% test coverage.<br>
-                <strong>Result:</strong> Seamless high-concurrency uptime and bi-weekly reliable zero-downtime deployments.
-              </p>
+            <div class="panel">
+              <div class="panel-head"><strong>Real-time collaboration at scale</strong><span class="chip">Turing</span></div>
+              <dl class="star">
+                <dt>Situation</dt><dd>Scaling chat &amp; collaboration tools for 10,000+ concurrent active users.</dd>
+                <dt>Task</dt><dd>Ensure zero-downtime releases and resilient UI state synchronization.</dd>
+                <dt>Action</dt><dd>Engineered React/TypeScript plugin architecture and automated CI/CD test suites with Jest &amp; Cypress achieving 90% test coverage.</dd>
+                <dt>Result</dt><dd>Seamless high-concurrency uptime and bi-weekly reliable zero-downtime deployments.</dd>
+              </dl>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h2 class="card-title">Tough questions</h2>
+            </div>
+            <p class="muted card-lead">Prepared answers for common high-friction topics.</p>
+
+            <div class="panel">
+              <div class="panel-head"><strong>"Where do you see yourself in 3–5 years?"</strong></div>
+              <p>"As a Principal Engineer or Staff Architect, driving core architectural decisions for high-scale distributed platforms, championing engineering excellence and AI-augmented developer productivity across multi-disciplinary teams."</p>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head"><strong>"What's your biggest strength &amp; weakness?"</strong></div>
+              <dl class="star">
+                <dt>Strength</dt><dd>Rapid architectural adaptability and full-stack performance optimization.</dd>
+                <dt>Growth</dt><dd>Used to over-optimize non-critical modules early; now I rigorously measure APM metrics first to focus optimizations where business impact is highest.</dd>
+              </dl>
             </div>
           </div>
         </div>
-
-        <!-- Right: Tough Interview Flashcards -->
-        <div class="chart-card">
-          <h3 style="font-family: 'Outfit', sans-serif; font-size: 17px; margin-bottom: 8px;">Tough Question Flashcards</h3>
-          <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
-            Strategic answers for common high-friction interview topics.
-          </p>
-
-          <div style="display: flex; flex-direction: column; gap: 14px;">
-            <div style="background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px;">
-              <strong style="font-size: 13px; color: var(--text-primary); display: block; margin-bottom: 4px;">
-                "Where do you see yourself in 3-5 years?"
-              </strong>
-              <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
-                "As a Principal Engineer or Staff Architect, driving core architectural decisions for high-scale distributed platforms, championing engineering excellence and AI-augmented developer productivity across multi-disciplinary teams."
-              </p>
-            </div>
-
-            <div style="background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px;">
-              <strong style="font-size: 13px; color: var(--text-primary); display: block; margin-bottom: 4px;">
-                "What's your biggest strength & weakness?"
-              </strong>
-              <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
-                <strong>Strength:</strong> Rapid architectural adaptability and full-stack performance optimization.<br>
-                <strong>Growth area:</strong> Used to over-optimize non-critical modules early; now I rigorously measure APM metrics first to focus optimizations where business impact is highest.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
+      </section>
+    </main>
   </div>
 
   <!-- Add Application Modal -->
-  <div class="modal-backdrop" id="add-modal">
-    <div class="modal-window">
+  <div class="modal-backdrop" id="add-modal" onclick="if (event.target === this) closeAddJobModal()">
+    <div class="modal-window" role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <div class="modal-header">
-        <h3 class="modal-title">Add Job Application</h3>
-        <button class="close-btn" onclick="closeAddJobModal()">✕</button>
+        <h3 class="modal-title" id="modal-title">Add application</h3>
+        <button class="icon-btn icon-btn-sm" onclick="closeAddJobModal()" aria-label="Close">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
       </div>
 
       <form id="add-job-form" onsubmit="handleAddJobSubmit(event)">
-        <div class="form-group">
-          <label>Company Name</label>
-          <input type="text" id="modal-company" required placeholder="e.g. Anthropic, Google, Stripe">
+        <div class="form-row">
+          <div class="field">
+            <label for="modal-company">Company</label>
+            <input type="text" id="modal-company" class="input" required placeholder="e.g. Stripe">
+          </div>
+          <div class="field">
+            <label for="modal-role">Role</label>
+            <input type="text" id="modal-role" class="input" required placeholder="e.g. Senior Full Stack Engineer">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label for="modal-sector">Sector</label>
+            <input type="text" id="modal-sector" class="input" placeholder="e.g. FinTech" value="AI & SaaS">
+          </div>
+          <div class="field">
+            <label for="modal-channel">Source</label>
+            <select class="input select" id="modal-channel">
+              <option value="LinkedIn">LinkedIn</option>
+              <option value="Freehire">Freehire / ATS</option>
+              <option value="Referral">Referral</option>
+              <option value="Company Website">Company website</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label for="modal-status">Status</label>
+            <select class="input select" id="modal-status">
+              <option value="drafted">Drafted</option>
+              <option value="applied">Applied</option>
+              <option value="interview">Interview</option>
+              <option value="offer">Offer</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="modal-source">Posting URL</label>
+            <input type="url" id="modal-source" class="input" placeholder="https://…">
+          </div>
+        </div>
+        <div class="field">
+          <label for="modal-notes">Notes</label>
+          <textarea id="modal-notes" class="input textarea-sm" placeholder="Key requirements, salary, interview dates…"></textarea>
         </div>
 
-        <div class="form-group">
-          <label>Role Title</label>
-          <input type="text" id="modal-role" required placeholder="e.g. Senior Full Stack Engineer">
-        </div>
-
-        <div class="form-group">
-          <label>Sector / Domain</label>
-          <input type="text" id="modal-sector" placeholder="e.g. AI / Developer Tools, FinTech" value="AI & SaaS">
-        </div>
-
-        <div class="form-group">
-          <label>Channel / Source</label>
-          <select class="filter-select" style="width: 100%;" id="modal-channel">
-            <option value="LinkedIn">LinkedIn</option>
-            <option value="Freehire">Freehire / ATS</option>
-            <option value="Referral">Referral</option>
-            <option value="Company Website">Company Website</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label>Initial Status</label>
-          <select class="filter-select" style="width: 100%;" id="modal-status">
-            <option value="drafted">Drafted</option>
-            <option value="applied">Applied (Active)</option>
-            <option value="interview">Interview</option>
-            <option value="offer">Offer</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label>Job Posting URL</label>
-          <input type="url" id="modal-source" placeholder="https://...">
-        </div>
-
-        <div class="form-group">
-          <label>Notes</label>
-          <textarea id="modal-notes" style="min-height: 80px;" placeholder="Key requirements, salary details, or interview dates..."></textarea>
-        </div>
-
-        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
-          <button type="button" class="btn-secondary" onclick="closeAddJobModal()">Cancel</button>
-          <button type="submit" class="btn-primary">Save to Pipeline</button>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeAddJobModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save to pipeline</button>
         </div>
       </form>
     </div>
   </div>
 
+  <!-- Profile Drawer -->
+  <div class="drawer-backdrop" id="profile-drawer" onclick="if (event.target === this) closeProfile()">
+    <aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-name">
+      <div class="drawer-cover">
+        <button class="btn btn-secondary drawer-edit" onclick="openProfileEditor()">Edit profile</button>
+        <button class="icon-btn icon-btn-sm drawer-close" onclick="closeProfile()" aria-label="Close profile">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="drawer-body" id="profile-body"></div>
+    </aside>
+  </div>
+
+  <div class="profile-menu" id="profile-menu" role="menu" hidden></div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
   <script src="app.js"></script>
+  <script src="tailor-ui.js"></script>
+  <script src="profiles-ui.js"></script>
 </body>
 </html>

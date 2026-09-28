@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { tailorCV, saveTailoredCV } from './tailor.js';
+import { resolveProfile, listProfiles, profileDetails, readProfileMarkdown, writeProfileMarkdown, evaluateAgainstProfile } from './profiles.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,6 +23,75 @@ const MIME_TYPES = {
   '.txt': 'text/plain',
   '.pdf': 'application/pdf'
 };
+
+// ---------- Job portal CLIs (.agents/skills/*-search) ----------
+
+const PORTAL_CLIS = {
+  freehire: '.agents/skills/freehire-search/cli/src/cli.ts',
+  linkedin: '.agents/skills/linkedin-search/cli/src/cli.ts'
+};
+
+// Dashboard regions mapped onto each portal's filters. Freehire tags jobs with
+// overlapping region codes, so each region ORs every code that belongs to it.
+const FREEHIRE_REGIONS = {
+  'APAC': ['--region', 'apac,asia'],
+  'APJ': ['--region', 'apac,asia,jp'],
+  'MENA': ['--region', 'mena,middle_east'],
+  'EMEA': ['--region', 'emea,eu,mena,middle_east,africa'],
+  'NAMER': ['--region', 'north_america,us,ca'],
+  'Worldwide': []
+};
+
+// LinkedIn resolves these names to its own geo regions
+const LINKEDIN_REGIONS = {
+  'APAC': 'APAC',
+  'APJ': 'APJ',
+  'MENA': 'MENA',
+  'EMEA': 'EMEA',
+  'NAMER': 'North America',
+  'Worldwide': 'Worldwide'
+};
+
+const CLI_TIMEOUT_MS = 45000;
+
+function runPortalCli(portal, args) {
+  return new Promise((resolve) => {
+    const child = spawn('bun', ['run', path.join(ROOT_DIR, PORTAL_CLIS[portal]), ...args], {
+      cwd: ROOT_DIR,
+      env: { ...process.env, PATH: `${process.env.HOME}/.bun/bin:${process.env.PATH}` }
+    });
+    let stdout = '';
+    let stderr = '';
+    let done = false;
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish({ stdout: '', stderr: 'The job board took too long to respond. Try again.', code: -1 });
+    }, CLI_TIMEOUT_MS);
+
+    child.stdout.on('data', (d) => { stdout += d.toString(); });
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    child.on('error', (err) => {
+      finish({ stdout: '', stderr: err.code === 'ENOENT' ? 'bun is not installed (https://bun.sh)' : err.message, code: -1 });
+    });
+    child.on('close', (code) => finish({ stdout, stderr, code }));
+  });
+}
+
+// CLIs print a one-line JSON or plain error on stderr; surface just the message
+function cliError(stderr, code) {
+  const text = (stderr || '').trim();
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed.error) return String(parsed.error.message || parsed.error);
+  } catch {}
+  return text.split('\n').filter(Boolean).pop() || `Search tool exited with code ${code}`;
+}
 
 function parseCSV(csvText) {
   const lines = csvText.trim().split('\n');
@@ -80,7 +151,7 @@ const server = http.createServer(async (req, res) => {
 
   // CORS headers for local versatility
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
@@ -89,7 +160,44 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Every API call works on the profile selected in the dashboard (?profile=<id>)
+  const profile = resolveProfile(ROOT_DIR, parsedUrl.searchParams.get('profile'));
+
   // API Endpoints
+  if (pathname === '/api/profiles' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(listProfiles(ROOT_DIR)));
+    return;
+  }
+
+  if (pathname === '/api/profile' && req.method === 'GET' && !profile.builtin) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(profileDetails(profile)));
+    return;
+  }
+
+  if (pathname === '/api/profile' && req.method === 'PUT') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { markdown } = JSON.parse(body || '{}');
+        if (typeof markdown !== 'string' || !markdown.trim() || markdown.length > 200000) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Profile text is empty or too long.' }));
+          return;
+        }
+        writeProfileMarkdown(profile, markdown);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   if (pathname === '/api/profile' && req.method === 'GET') {
     try {
       const profilePath = path.join(ROOT_DIR, '.claude/skills/job-application-assistant/01-candidate-profile.md');
@@ -121,9 +229,49 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // CV tailoring (see tailor.js)
+  if (pathname === '/api/tailor' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { title = '', company = '', description = '', save = false } = JSON.parse(body || '{}');
+        if (!description.trim()) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Paste a job description first.' }));
+          return;
+        }
+        const profileMd = readProfileMarkdown(profile);
+        if (!profileMd.trim()) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Candidate profile not found. Run /setup first.' }));
+          return;
+        }
+        const result = tailorCV({ title, company, description }, profileMd);
+        if (!result.cv.name || !result.cv.experience.length) {
+          res.writeHead(422, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: `The ${profile.label} profile is still empty. Fill in its name and experience first.` }));
+          return;
+        }
+        if (save) result.savedTo = saveTailoredCV(result, ROOT_DIR);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   if (pathname === '/api/tracker' && req.method === 'GET') {
     try {
-      const trackerPath = path.join(ROOT_DIR, 'job_search_tracker.csv');
+      const trackerPath = profile.trackerPath;
+      if (!fs.existsSync(trackerPath) && !profile.builtin) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('[]');
+        return;
+      }
       if (!fs.existsSync(trackerPath)) {
         // Return starter template if empty
         const starterHeaders = ['date', 'company', 'sector', 'role', 'role_type', 'channel', 'status', 'contact_person', 'fit_rating', 'notes', 'cv_file', 'cover_letter_file', 'source', 'deadline'];
@@ -183,7 +331,8 @@ const server = http.createServer(async (req, res) => {
     req.on('end', () => {
       try {
         const payload = JSON.parse(body);
-        const trackerPath = path.join(ROOT_DIR, 'job_search_tracker.csv');
+        const trackerPath = profile.trackerPath;
+        fs.mkdirSync(path.dirname(trackerPath), { recursive: true });
         const headers = ['date', 'company', 'sector', 'role', 'role_type', 'channel', 'status', 'contact_person', 'fit_rating', 'notes', 'cv_file', 'cover_letter_file', 'source', 'deadline'];
         
         let rows = [];
@@ -238,44 +387,56 @@ const server = http.createServer(async (req, res) => {
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
       try {
-        const { query = 'Senior Full Stack Engineer', location = 'Remote', portal = 'freehire', limit = 10 } = JSON.parse(body || '{}');
-        
-        let cmd = 'bun';
-        let args = [];
-        
-        if (portal === 'linkedin') {
-          args = ['run', path.join(ROOT_DIR, '.agents/skills/linkedin-search/cli/src/cli.ts'), 'search', '-q', query, '-l', location, '--limit', String(limit)];
-        } else {
-          // Default freehire
-          args = ['run', path.join(ROOT_DIR, '.agents/skills/freehire-search/cli/src/cli.ts'), 'search', '-q', query, '--limit', String(limit)];
+        const { query = 'Senior Full Stack Engineer', location = 'Worldwide', remoteOnly = false, portal = 'freehire', limit = 10 } = JSON.parse(body || '{}');
+        const n = String(Math.min(25, Math.max(1, parseInt(limit) || 10)));
+        const tool = PORTAL_CLIS[portal] ? portal : 'freehire';
+        // LinkedIn's public listings ignore the workplace-type filter, so for
+        // remote-only searches also require the word "remote" in the posting
+        const linkedinQuery = remoteOnly ? `${query} remote` : query;
+        const args = tool === 'linkedin'
+          ? ['search', '-q', linkedinQuery, '-l', LINKEDIN_REGIONS[location] || 'Worldwide', '--limit', n]
+          : ['search', '-q', query, '--limit', n, '--description-format', 'text',
+             ...(FREEHIRE_REGIONS[location] || [])];
+        if (remoteOnly) args.push('--remote', 'remote');
+
+        const { stdout, stderr, code } = await runPortalCli(tool, args);
+        if (code !== 0 && !stdout) {
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: cliError(stderr, code) }));
+          return;
         }
+        let data;
+        try { data = JSON.parse(stdout); } catch { data = { results: [] }; }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ portal: tool, results: data.results || [], remoteApprox: tool === 'linkedin' && !!remoteOnly }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
 
-        const child = spawn(cmd, args, {
-          cwd: ROOT_DIR,
-          env: { ...process.env, PATH: `${process.env.HOME}/.bun/bin:${process.env.PATH}` }
-        });
-
-        let stdout = '';
-        let stderr = '';
-
-        child.stdout.on('data', (d) => { stdout += d.toString(); });
-        child.stderr.on('data', (d) => { stderr += d.toString(); });
-
-        child.on('close', (code) => {
-          if (code !== 0 && !stdout) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: stderr || `Process exited with code ${code}` }));
-            return;
-          }
-          try {
-            const data = JSON.parse(stdout);
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(data));
-          } catch (pe) {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ raw: stdout, results: [] }));
-          }
-        });
+  // Full posting for a single search result (LinkedIn search results carry no description)
+  if (pathname === '/api/job-detail' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const { portal = 'linkedin', id = '' } = JSON.parse(body || '{}');
+        if (!PORTAL_CLIS[portal] || !/^[A-Za-z0-9_-]{1,200}$/.test(String(id))) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid job reference' }));
+          return;
+        }
+        const { stdout, stderr, code } = await runPortalCli(portal, ['detail', String(id), '--format', 'json']);
+        if (code !== 0 && !stdout) {
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: cliError(stderr, code) }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(stdout);
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
@@ -291,6 +452,11 @@ const server = http.createServer(async (req, res) => {
     req.on('end', () => {
       try {
         const { title = '', company = '', description = '' } = JSON.parse(body || '{}');
+        if (!profile.builtin) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(evaluateAgainstProfile(profile, { title, description })));
+          return;
+        }
         const text = `${title} ${description}`.toLowerCase();
         
         // Comprehensive scoring engine against Hassaan Nasir's profile

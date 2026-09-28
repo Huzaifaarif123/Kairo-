@@ -1,0 +1,5 @@
+[
+  { "id": "data-engineer", "label": "Data Engineer" },
+  { "id": "uiux-designer", "label": "UI/UX Designer" },
+  { "id": "devops-engineer", "label": "Senior DevOps Engineer" }
+]

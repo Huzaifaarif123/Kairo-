@@ -116,3 +116,6 @@ company_research/*.json
 
 # Brainstorm mockups (superpowers visual companion) - never ship
 .superpowers/
+
+# Dashboard profiles: each profile folder holds a person's CV data and tracker
+profiles/*/
