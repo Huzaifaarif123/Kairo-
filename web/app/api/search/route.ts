@@ -1,4 +1,6 @@
 import { searchFreehire, searchLinkedIn } from '@/lib/jobs';
+import { isRemoteSource, searchRemoteBoard, boardNote, REMOTE_SOURCES } from '@/lib/remote-boards';
+import { searchAllBoards, vetBoardResults } from '@/lib/search-all';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -7,19 +9,41 @@ const TIMEOUT_MS = 45000;
 
 export async function POST(req: Request) {
   try {
-    const { query = 'Senior Full Stack Engineer', location = 'Worldwide', remoteOnly = false, portal = 'freehire', limit = 10 } = await req.json().catch(() => ({}));
-    const tool = portal === 'linkedin' ? 'linkedin' : 'freehire';
+    const { query = 'Senior Full Stack Engineer', location = 'Worldwide', remoteOnly = false, portal = 'all', limit = 10, maxAgeDays = 7 } = await req.json().catch(() => ({}));
     const params = {
-      query: String(query),
+      query: String(query).slice(0, 200),
       location: String(location),
       remoteOnly: Boolean(remoteOnly),
+      // Posted within the last N days (default one week)
+      maxAgeDays: Math.min(30, Math.max(1, parseInt(maxAgeDays) || 7)),
       limit: Math.min(25, Math.max(1, parseInt(limit) || 10))
     };
-    const search = tool === 'linkedin' ? searchLinkedIn(params) : searchFreehire(params);
+
+    // Default: every job board at once
+    if (!portal || portal === 'all') {
+      const { results, boards } = await searchAllBoards(params);
+      return Response.json({ portal: 'all', results, boards, remoteApprox: params.remoteOnly });
+    }
+    const tool = portal === 'linkedin' || isRemoteSource(portal) ? portal : 'freehire';
+
+    let search: Promise<object[]>;
+    let label: string;
+    if (tool === 'linkedin') { search = searchLinkedIn(params); label = 'LinkedIn'; }
+    else if (isRemoteSource(tool)) { search = searchRemoteBoard(tool, params); label = REMOTE_SOURCES[tool]; }
+    else { search = searchFreehire(params); label = 'Freehire'; }
+
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('The job board took too long to respond. Try again.')), TIMEOUT_MS));
-    const results = await Promise.race([search, timeout]);
-    return Response.json({ portal: tool, results, remoteApprox: tool === 'linkedin' && params.remoteOnly });
+    const found = (await Promise.race([search, timeout])) as { title?: string | null; company?: string | null; url?: string | null }[];
+    const results = vetBoardResults(tool, found, params.query).map(r => ({ source: label, portal: tool, ...r }));
+
+    return Response.json({
+      portal: tool,
+      source: label,
+      results,
+      remoteApprox: tool === 'linkedin' && params.remoteOnly,
+      note: isRemoteSource(tool) ? boardNote(tool, params.location) : null
+    });
   } catch (err) {
     return Response.json({ error: (err as Error).message }, { status: 502 });
   }

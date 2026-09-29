@@ -156,6 +156,26 @@ function isComplete(parsed: ReturnType<typeof parseProfile>): boolean {
   return Boolean(parsed.name && (parsed.experience.length || parsed.skills.length));
 }
 
+// The main profile ships with Hassaan Nasir's details, which have a hand-written
+// summary, scorer and CV Studio content. Once someone else's details are saved into it
+// (e.g. by importing a CV), it's treated like any other profile.
+const ORIGINAL_OWNER = 'hassaan nasir';
+
+function isOriginalOwner(p: ProfileEntry, parsed: ReturnType<typeof parseProfile>): boolean {
+  return p.builtin && String(parsed.name || '').trim().toLowerCase() === ORIGINAL_OWNER;
+}
+
+export async function usesOriginalOwner(p: ProfileEntry): Promise<boolean> {
+  return p.builtin && isOriginalOwner(p, parseProfile(await getProfileMarkdown(p)));
+}
+
+function profileTitle(p: ProfileEntry, md: string, parsed: ReturnType<typeof parseProfile>): string {
+  return field(md, 'Title')
+    || (isOriginalOwner(p, parsed) ? 'Senior Full Stack & AI Engineer' : '')
+    || (p.builtin ? parsed.experience[0]?.role : '')
+    || p.label;
+}
+
 export async function listProfiles() {
   return Promise.all([BUILTIN, ...registry()].map(async p => {
     let md: string;
@@ -164,7 +184,7 @@ export async function listProfiles() {
     } catch (err) {
       // Keep the switcher usable if the database is briefly unreachable
       console.error(`Could not load profile ${p.id}:`, (err as Error).message);
-      return { id: p.id, label: p.label, builtin: p.builtin, name: '', title: p.label, initials: initials(p.label), complete: false, error: 'Could not load from the database' };
+      return { id: p.id, label: p.label, builtin: p.builtin, original: false, name: '', title: p.label, initials: initials(p.label), complete: false, error: 'Could not load from the database' };
     }
     const parsed = parseProfile(md);
     const name = parsed.name || '';
@@ -172,8 +192,9 @@ export async function listProfiles() {
       id: p.id,
       label: p.label,
       builtin: p.builtin,
+      original: isOriginalOwner(p, parsed),
       name,
-      title: p.builtin ? 'Senior Full Stack & AI Engineer' : (field(md, 'Title') || p.label),
+      title: profileTitle(p, md, parsed),
       initials: initials(name || p.label),
       complete: isComplete(parsed)
     };
@@ -183,9 +204,15 @@ export async function listProfiles() {
 // Profile JSON for the dashboard's profile panel
 export async function profileDetails(p: ProfileEntry) {
   const md = await getProfileMarkdown(p);
-  if (p.builtin) {
-    // The built-in profile keeps the original dashboard's hand-written summary
+  const parsed = parseProfile(md);
+  if (isOriginalOwner(p, parsed)) {
+    // Hassaan's original profile keeps the original dashboard's hand-written summary
     return {
+      id: p.id,
+      label: p.label,
+      builtin: true,
+      original: true,
+      complete: true,
       name: 'Hassaan Nasir',
       title: 'Senior Full Stack & AI Engineer',
       experience: '8+ Years',
@@ -202,13 +229,14 @@ export async function profileDetails(p: ProfileEntry) {
       rawMarkdown: md
     };
   }
-  const parsed = parseProfile(md);
   const years = yearsOfExperience(parsed.experience);
   return {
     id: p.id,
     label: p.label,
+    builtin: p.builtin,
+    original: false,
     name: parsed.name || p.label,
-    title: field(md, 'Title') || p.label,
+    title: profileTitle(p, md, parsed),
     experience: years ? `${years}+ Years` : '',
     email: parsed.email,
     location: parsed.location,

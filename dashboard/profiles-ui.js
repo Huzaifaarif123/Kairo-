@@ -19,7 +19,7 @@ async function initProfiles() {
   }
   applyProfileIdentity();
   const current = currentProfile();
-  if (current && !current.builtin) {
+  if (current && !current.original) {
     document.getElementById('search-query-input').value = current.title;
   }
 }
@@ -39,7 +39,11 @@ function applyProfileIdentity() {
   document.getElementById('side-role').textContent = role;
   document.getElementById('top-avatar').textContent = initials;
   document.title = `Job Engine | ${name}`;
-  document.body.dataset.builtin = p && !p.builtin ? 'false' : 'true';
+  // Hassaan's hand-written CV Studio, Interview and sample evaluation only show while
+  // the main profile still holds his details (not after someone else's CV is imported)
+  const original = !p || p.original ? 'true' : 'false';
+  if (original === 'false' && document.body.dataset.builtin !== 'false') resetEvaluator();
+  document.body.dataset.builtin = original;
   document.querySelectorAll('.profile-custom-name').forEach(el => { el.textContent = name; });
 }
 
@@ -126,7 +130,7 @@ async function switchProfile(id) {
   renderDashboard();
 
   const p = currentProfile();
-  document.getElementById('search-query-input').value = p && !p.builtin ? p.title : 'Senior Full Stack Engineer';
+  document.getElementById('search-query-input').value = p && !p.original ? p.title : 'Senior Full Stack Engineer';
   if (document.getElementById('tab-search').classList.contains('active')) executeJobSearch();
 
   showToast(`Switched to ${p ? (p.name || p.label) : 'profile'}${p && !p.complete ? ' — this profile is still empty' : ''}`);

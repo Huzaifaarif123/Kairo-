@@ -58,15 +58,34 @@ export function listProfiles(rootDir) {
   });
 }
 
+// The main profile ships with Hassaan Nasir's details, which have a hand-written
+// summary, scorer and CV Studio content. Once someone else's details are saved into it
+// (e.g. by importing a CV), it's treated like any other profile.
+function isOriginalOwner(profile, parsed) {
+  return !!profile.builtin && String(parsed.name || '').trim().toLowerCase() === 'hassaan nasir';
+}
+
+export function usesOriginalOwner(profile) {
+  return isOriginalOwner(profile, parseProfile(readProfileMarkdown(profile)));
+}
+
+function profileTitle(profile, md, parsed) {
+  return field(md, 'Title')
+    || (isOriginalOwner(profile, parsed) ? 'Senior Full Stack & AI Engineer' : '')
+    || (profile.builtin ? parsed.experience[0]?.role : '')
+    || profile.label;
+}
+
 function summarize(profile) {
   const md = readProfileMarkdown(profile);
   const parsed = parseProfile(md);
-  const title = profile.builtin ? 'Senior Full Stack & AI Engineer' : (field(md, 'Title') || profile.label);
+  const title = profileTitle(profile, md, parsed);
   const name = parsed.name || '';
   return {
     id: profile.id,
     label: profile.label,
     builtin: !!profile.builtin,
+    original: isOriginalOwner(profile, parsed),
     name,
     title,
     initials: initials(name || profile.label),
@@ -99,7 +118,7 @@ function isComplete(parsed) {
   return !!(parsed.name && (parsed.experience.length || parsed.skills.length));
 }
 
-// Profile JSON for the dashboard's profile panel (non-built-in profiles)
+// Profile JSON for the dashboard's profile panel (all but Hassaan's original profile)
 export function profileDetails(profile) {
   const md = readProfileMarkdown(profile);
   const parsed = parseProfile(md);
@@ -107,8 +126,10 @@ export function profileDetails(profile) {
   return {
     id: profile.id,
     label: profile.label,
+    builtin: !!profile.builtin,
+    original: false,
     name: parsed.name || profile.label,
-    title: field(md, 'Title') || profile.label,
+    title: profileTitle(profile, md, parsed),
     experience: years ? `${years}+ Years` : '',
     email: parsed.email,
     location: parsed.location,

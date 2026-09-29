@@ -29,6 +29,23 @@ export interface SearchParams {
   location: string;
   remoteOnly: boolean;
   limit: number;
+  // Only jobs posted within this many days (whole days, see ageInDays)
+  maxAgeDays?: number;
+}
+
+// Whole days since a posting date (0 = within the last 24 hours). Dates in the
+// future (clock differences between sites) count as today; unknown dates as null.
+export function ageInDays(date: unknown, now = Date.now()): number | null {
+  if (!date) return null;
+  const t = typeof date === 'number' ? (date < 1e12 ? date * 1000 : date) : Date.parse(String(date));
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, Math.floor((now - t) / 86_400_000));
+}
+
+export function isRecent(date: unknown, maxAgeDays: number | undefined): boolean {
+  if (!maxAgeDays) return true;
+  const age = ageInDays(date);
+  return age !== null && age <= maxAgeDays;
 }
 
 // ---------- Shared fetch with retry ----------
@@ -65,7 +82,8 @@ interface FreehireJob {
   posted_at: string | null;
 }
 
-export async function searchFreehire({ query, location, remoteOnly, limit }: SearchParams) {
+export async function searchFreehire(params: SearchParams) {
+  const { query, location, remoteOnly, limit } = params;
   const p = new URLSearchParams();
   if (query) p.set('q', query);
   p.set('limit', String(limit));
@@ -73,6 +91,7 @@ export async function searchFreehire({ query, location, remoteOnly, limit }: Sea
   p.set('semantic_ratio', '0');
   p.set('include_description', 'true');
   p.set('description_format', 'text');
+  if (params.maxAgeDays) p.set('posted_within_days', String(params.maxAgeDays));
   if (remoteOnly) p.set('work_mode', 'remote');
   for (const region of FREEHIRE_REGIONS[location] || []) p.append('regions', region);
 
@@ -85,7 +104,7 @@ export async function searchFreehire({ query, location, remoteOnly, limit }: Sea
   const body = (await res.json().catch(() => null)) as { data?: FreehireJob[]; error?: string } | null;
   if (!res.ok) throw new Error(body?.error || `freehire API request failed: ${res.status}`);
 
-  return (body?.data || []).map(j => ({
+  return (body?.data || []).filter(j => isRecent(j.posted_at, params.maxAgeDays)).map(j => ({
     id: j.public_slug,
     title: j.title || '(untitled)',
     company: j.company || null,
@@ -165,13 +184,15 @@ async function linkedinHtml(url: string): Promise<string> {
   return res.text();
 }
 
-export async function searchLinkedIn({ query, location, remoteOnly, limit }: SearchParams) {
+export async function searchLinkedIn(sp: SearchParams) {
+  const { query, location, remoteOnly, limit } = sp;
   const params = new URLSearchParams();
   // LinkedIn's public listings ignore the workplace-type filter, so for
   // remote-only searches also require the word "remote" in the posting
   params.set('keywords', remoteOnly ? `${query} remote` : query);
   params.set('location', LINKEDIN_REGIONS[location] || 'Worldwide');
   if (remoteOnly) params.set('f_WT', '2');
+  if (sp.maxAgeDays) params.set('f_TPR', `r${sp.maxAgeDays * 86400}`);
   params.set('start', '0');
 
   const html = await linkedinHtml(`${LINKEDIN_SEARCH}?${params}`);
@@ -205,13 +226,15 @@ export async function searchLinkedIn({ query, location, remoteOnly, limit }: Sea
     const loc = chunk.match(/class="job-search-card__location"[^>]*>([\s\S]*?)<\/span>/i);
     const dt = chunk.match(/class="job-search-card__listdate[^"]*"[^>]*datetime="([^"]+)"/i);
 
+    const date = dt ? dt[1] : null;
+    if (!isRecent(date, sp.maxAgeDays)) continue;
     results.push({
       id,
       title,
       company,
       companyUrl,
       location: loc ? clean(loc[1]) || null : null,
-      date: dt ? dt[1] : null,
+      date,
       url: url || `https://www.linkedin.com/jobs/view/${id}`
     });
     if (results.length >= limit) break;

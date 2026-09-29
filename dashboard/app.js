@@ -120,6 +120,7 @@ function parseProfileMarkdown(rawMd) {
 
   return {
     status: statusLine,
+    summary: section('Summary').split('\n').map(l => l.trim()).filter(Boolean).join(' '),
     experience,
     education: tableRows(section('Education')).map(r => ({ degree: r[0], period: r[1], school: r[2] })),
     languages: tableRows(md.match(/### Languages\s*\n([\s\S]*?)\n\n/)?.[1] || '').map(r => ({ name: r[0], level: r[1] })),
@@ -133,8 +134,8 @@ function parseProfileMarkdown(rawMd) {
 
 function renderProfile(p) {
   const body = document.getElementById('profile-body');
-  const md = p.rawMarkdown ? parseProfileMarkdown(p.rawMarkdown) : { experience: [], education: [], languages: [], projects: [], certifications: [] };
-  const name = p.name || p.label || 'Hassaan Nasir';
+  const md = p.rawMarkdown ? parseProfileMarkdown(p.rawMarkdown) : { summary: '', experience: [], education: [], languages: [], projects: [], certifications: [] };
+  const name = p.name || p.label || 'Your profile';
   const skillGroups = p.skillGroups ? p.skillGroups.map(g => [g.group, g.items]) : [
     ['Core', p.skills?.primary],
     ['AI & LLMs', p.skills?.ai],
@@ -149,7 +150,7 @@ function renderProfile(p) {
     <div class="drawer-identity">
       <div class="avatar avatar-xl">${escapeHtml(initials(name))}</div>
       <h2 id="drawer-name">${escapeHtml(name)}</h2>
-      <p class="drawer-title">${escapeHtml(p.title || 'Senior Full Stack & AI Engineer')}</p>
+      ${p.title ? `<p class="drawer-title">${escapeHtml(p.title)}</p>` : ''}
       ${md.status ? `<span class="open-badge"><i></i>${escapeHtml(md.status)}</span>` : ''}
     </div>
 
@@ -164,6 +165,12 @@ function renderProfile(p) {
       ${p.linkedin ? `<a href="${escapeHtml(p.linkedin)}" target="_blank" rel="noopener noreferrer">${ICONS.linkedin}<span>${escapeHtml(linkedinHandle)}</span>${ICONS.external}</a>` : ''}
       ${p.location ? `<div>${ICONS.pin}<span>${escapeHtml(p.location)}</span></div>` : ''}
     </div>
+
+    ${md.summary ? `
+    <section class="drawer-section">
+      <h3>Summary</h3>
+      <p class="drawer-summary">${escapeHtml(md.summary)}</p>
+    </section>` : ''}
 
     ${md.experience.length ? `
     <section class="drawer-section">
@@ -559,72 +566,48 @@ function handleDrop(event, targetStatus) {
 // Live Job Search Engine
 async function executeJobSearch() {
   const query = document.getElementById('search-query-input').value.trim();
-  const portal = document.getElementById('search-portal-select').value;
   const location = document.getElementById('search-location-select').value;
   const remoteOnly = document.getElementById('search-remote-only').checked;
   const statusBar = document.getElementById('search-status-bar');
   const button = document.getElementById('btn-run-search');
-  const portalName = portal === 'linkedin' ? 'LinkedIn' : 'Freehire';
-  let searchError = '';
 
   const where = `${remoteOnly ? 'remote roles in ' : ''}${escapeHtml(location)}`;
-  setNotice(statusBar, 'info', `Searching <strong>${portalName}</strong> for “${escapeHtml(query)}” — ${where}…`);
+  setNotice(statusBar, 'info', `Searching all job boards for “${escapeHtml(query)}” — ${where}…`);
   renderSearchSkeleton();
+  document.getElementById('age-filter').hidden = true;
+  activeAgeGroup = 'all';
   button.disabled = true;
 
+  let searchError = '';
   try {
     const res = await fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, portal, location, remoteOnly, limit: 9 })
+      body: JSON.stringify({ query, portal: 'all', location, remoteOnly, limit: 10, maxAgeDays: MAX_JOB_AGE_DAYS })
     });
-
     const data = await res.json().catch(() => ({}));
     if (res.ok) {
-      const results = (data.results || []).map(r => ({ ...r, portal: data.portal || portal }));
+      const results = data.results || [];
       renderSearchResults(results);
-      const caveat = data.remoteApprox
-        ? ' LinkedIn can’t filter by remote, so these are roles that mention “remote” — check each posting.'
-        : '';
-      setNotice(statusBar, data.remoteApprox ? 'warn' : 'info', `Found <strong>${results.length}</strong> live ${results.length === 1 ? 'role' : 'roles'} on ${portalName} — ${where}.${caveat}`);
+      const boards = data.boards || [];
+      const found = boards.filter(b => b.count > 0).map(b => `${escapeHtml(b.source)} ${b.count}`).join(' · ');
+      const failed = boards.filter(b => b.error);
+      let html = `Found <strong>${results.length}</strong> ${results.length === 1 ? 'role' : 'roles'} posted in the last ${MAX_JOB_AGE_DAYS} days across ${boards.length - failed.length} job boards — ${where}.`;
+      if (found) html += `<br><span class="board-counts">${found}</span>`;
+      if (failed.length) html += `<br>Not available right now: ${failed.map(b => escapeHtml(b.source)).join(', ')}.`;
+      if (data.remoteApprox) html += '<br>LinkedIn can’t filter by remote, so its results are roles that mention “remote” — check those postings.';
+      setNotice(statusBar, failed.length || data.remoteApprox ? 'warn' : 'info', html);
       button.disabled = false;
       return;
     }
-    searchError = data.error || `Server error ${res.status}`;
+    searchError = data.error || `server error ${res.status}`;
   } catch (e) {
-    console.warn('API fetch failed, falling back to sample listings', e);
-    searchError = 'The dashboard server is not reachable';
+    searchError = 'the dashboard server is not reachable';
   }
 
-  const fallbackResults = [
-    {
-      title: 'Senior Full Stack AI Engineer',
-      company: 'Deployly AI',
-      location: 'Remote',
-      url: 'https://www.linkedin.com/jobs/view/ai-engineer-at-deployly-ai-4447791646',
-      skills: ['python', 'django', 'react', 'next.js', 'claude code', 'mcp', 'aws'],
-      description: 'Building intelligent developer agent workflows with Python, Next.js, and Anthropic Claude APIs. High ownership of distributed architectures and asynchronous microservices.'
-    },
-    {
-      title: 'Senior Backend Engineer (Python / Distributed Systems)',
-      company: 'Nexus Scale Cloud',
-      location: 'Remote / UAE',
-      url: 'https://freehire.me/jobs/nexus-backend',
-      skills: ['python', 'drf', 'celery', 'redis', 'postgresql', 'docker', 'kubernetes'],
-      description: 'Lead backend microservices handling high-throughput event processing. 5+ years with Django/DRF, Celery, and database schema performance tuning.'
-    },
-    {
-      title: 'Full Stack Engineer (React, Next.js & Python)',
-      company: 'Quantis AI',
-      location: 'Remote',
-      url: 'https://freehire.me/jobs/quantis-fullstack',
-      skills: ['react', 'next.js', 'typescript', 'python', 'fastapi', 'tailwind css'],
-      description: 'Design intuitive, data-intensive web apps with Next.js and high-performance Python APIs. Deep focus on Core Web Vitals and clean state architecture.'
-    }
-  ];
-
-  renderSearchResults(fallbackResults);
-  setNotice(statusBar, 'warn', `<strong>Live search failed</strong> — ${escapeHtml(searchError)}. Showing sample listings instead.`);
+  // No sample listings: show what went wrong instead
+  renderSearchResults([]);
+  setNotice(statusBar, 'warn', `<strong>Live search failed</strong> — ${escapeHtml(searchError)}. Try again in a moment.`);
   button.disabled = false;
 }
 
@@ -650,20 +633,76 @@ function renderSearchSkeleton() {
     </div>`).join('');
 }
 
+// Job age groups (whole days since posting; search returns the last 7 days)
+const MAX_JOB_AGE_DAYS = 7;
+const AGE_GROUPS = [
+  { key: 'today', label: 'Today', tag: 'Posted today', test: d => d === 0 },
+  { key: '1', label: '1 day ago', tag: 'Posted 1 day ago', test: d => d === 1 },
+  { key: '2', label: '2 days ago', tag: 'Posted 2 days ago', test: d => d === 2 },
+  { key: '3-4', label: '3–4 days ago', tag: 'Posted 3–4 days ago', test: d => d >= 3 && d <= 4 },
+  { key: '5-7', label: '5–7 days ago', tag: 'Posted 5–7 days ago', test: d => d >= 5 && d <= MAX_JOB_AGE_DAYS }
+];
+let activeAgeGroup = 'all';
+
+function jobAgeDays(date) {
+  if (!date) return null;
+  const t = typeof date === 'number' ? (date < 1e12 ? date * 1000 : date) : Date.parse(date);
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86400000));
+}
+
+function ageGroupOf(job) {
+  const d = jobAgeDays(job.date);
+  return d === null ? null : AGE_GROUPS.find(g => g.test(d)) || null;
+}
+
+function setAgeGroup(key) {
+  activeAgeGroup = key;
+  renderSearchResults(searchResults);
+}
+
 function renderSearchResults(results) {
   const container = document.getElementById('job-results-container');
+  const filter = document.getElementById('age-filter');
   if (!container) return;
   searchResults = results;
 
   if (results.length === 0) {
-    container.innerHTML = `<div class="card empty" style="grid-column: 1 / -1">No roles found for this search. Try a broader keyword.</div>`;
+    filter.hidden = true;
+    container.innerHTML = `<div class="card empty" style="grid-column: 1 / -1">No jobs posted in the last ${MAX_JOB_AGE_DAYS} days for this search. Try a broader keyword or another region.</div>`;
     return;
   }
 
-  container.innerHTML = results.map((j, i) => {
-    const skills = (j.skills || []).map(s => String(s).replace(/-/g, ' '));
-    const desc = String(j.description || '').replace(/[*_#`>]+/g, '').replace(/\s+/g, ' ').trim();
-    return `
+  // Group while keeping each job's index into searchResults (used by Evaluate fit)
+  const groups = AGE_GROUPS.map(g => ({ ...g, items: [] }));
+  results.forEach((j, i) => {
+    const g = ageGroupOf(j);
+    const target = g ? groups.find(x => x.key === g.key) : null;
+    if (target) target.items.push(i);
+  });
+  if (activeAgeGroup !== 'all' && !groups.some(g => g.key === activeAgeGroup && g.items.length)) activeAgeGroup = 'all';
+
+  const total = groups.reduce((n, g) => n + g.items.length, 0);
+  filter.hidden = false;
+  filter.innerHTML = [
+    `<button class="age-chip ${activeAgeGroup === 'all' ? 'active' : ''}" role="tab" aria-selected="${activeAgeGroup === 'all'}" onclick="setAgeGroup('all')">All <span>${total}</span></button>`,
+    ...groups.filter(g => g.items.length).map(g =>
+      `<button class="age-chip ${activeAgeGroup === g.key ? 'active' : ''}" role="tab" aria-selected="${activeAgeGroup === g.key}" onclick="setAgeGroup('${g.key}')">${g.label} <span>${g.items.length}</span></button>`)
+  ].join('');
+
+  container.innerHTML = groups
+    .filter(g => g.items.length && (activeAgeGroup === 'all' || activeAgeGroup === g.key))
+    .map(g => `<h3 class="age-heading">${g.label} <span>${g.items.length} ${g.items.length === 1 ? 'job' : 'jobs'}</span></h3>` +
+      g.items.map(i => jobCardHtml(results[i], i, g.tag)).join(''))
+    .join('');
+}
+
+function jobCardHtml(j, i, ageTag) {
+  const skills = (j.skills || []).map(s => String(s).replace(/-/g, ' '));
+  const desc = String(j.description || '').replace(/\*\*|__|`|^#{1,6}\s+/gm, '').replace(/\s+/g, ' ').trim();
+  const place = String(j.location || 'Remote');
+  const allPlaces = Array.isArray(j.locations) && j.locations.length > 3 ? j.locations.join(', ') : place;
+  return `
       <div class="card job-card">
         <div class="job-head">
           <div class="logo">${escapeHtml(initials(j.company))}</div>
@@ -674,10 +713,12 @@ function renderSearchResults(results) {
         </div>
         <p class="job-desc">${desc ? escapeHtml(desc) : 'Open the posting to read the full description.'}</p>
         <div class="tags">
-          <span class="tag">${escapeHtml(j.location || 'Remote')}</span>
+          ${ageTag ? `<span class="tag tag-age">${escapeHtml(ageTag)}</span>` : ''}
+          ${j.source ? `<span class="tag tag-source">via ${escapeHtml(j.source)}</span>` : ''}
+          <span class="tag" title="${escapeHtml(allPlaces)}">${escapeHtml(place)}</span>
           ${j.countries && j.countries.length > 1 ? `<span class="tag" title="${escapeHtml(j.countries.map(c => c.toUpperCase()).join(', '))}">+${j.countries.length - 1} more ${j.countries.length === 2 ? 'location' : 'locations'}</span>` : ''}
           ${j.work_mode === 'remote' ? '<span class="tag">Remote</span>' : ''}
-          ${skills.slice(0, 5).map(s => `<span class="tag">${escapeHtml(s)}</span>`).join('')}
+          ${skills.slice(0, 4).map(s => `<span class="tag">${escapeHtml(s)}</span>`).join('')}
         </div>
         <div class="job-foot">
           ${j.url ? `<a href="${escapeHtml(j.url)}" target="_blank" rel="noopener noreferrer">View posting ${ICONS.external}</a>` : '<span></span>'}
@@ -685,7 +726,6 @@ function renderSearchResults(results) {
         </div>
       </div>
     `;
-  }).join('');
 }
 
 async function evaluateSearchResult(i) {

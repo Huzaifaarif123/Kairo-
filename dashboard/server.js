@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { tailorCV, saveTailoredCV } from './tailor.js';
-import { resolveProfile, listProfiles, profileDetails, readProfileMarkdown, writeProfileMarkdown, evaluateAgainstProfile } from './profiles.js';
+import { resolveProfile, listProfiles, profileDetails, usesOriginalOwner, readProfileMarkdown, writeProfileMarkdown, evaluateAgainstProfile } from './profiles.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -170,7 +170,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (pathname === '/api/profile' && req.method === 'GET' && !profile.builtin) {
+  if (pathname === '/api/profile' && req.method === 'GET' && !usesOriginalOwner(profile)) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(profileDetails(profile)));
     return;
@@ -207,6 +207,11 @@ const server = http.createServer(async (req, res) => {
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
+        id: profile.id,
+        label: profile.label,
+        builtin: true,
+        original: true,
+        complete: true,
         name: 'Hassaan Nasir',
         title: 'Senior Full Stack & AI Engineer',
         experience: '8+ Years',
@@ -389,7 +394,37 @@ const server = http.createServer(async (req, res) => {
       try {
         const { query = 'Senior Full Stack Engineer', location = 'Worldwide', remoteOnly = false, portal = 'freehire', limit = 10 } = JSON.parse(body || '{}');
         const n = String(Math.min(25, Math.max(1, parseInt(limit) || 10)));
-        const tool = PORTAL_CLIS[portal] ? portal : 'freehire';
+        // "all": this classic server has Freehire and LinkedIn; search both together
+        if (portal === 'all') {
+          const n = String(Math.min(25, Math.max(1, parseInt(limit) || 10)));
+          const jobs = [
+            // Last 7 days only, like the Next.js app
+            ['freehire', 'Freehire', ['search', '-q', query, '--limit', n, '--jobage', '7', '--description-format', 'text', ...(FREEHIRE_REGIONS[location] || [])]],
+            ['linkedin', 'LinkedIn', ['search', '-q', remoteOnly ? `${query} remote` : query, '-l', LINKEDIN_REGIONS[location] || 'Worldwide', '--limit', n, '--jobage', '7']]
+          ];
+          const outputs = await Promise.all(jobs.map(async ([tool, label, args]) => {
+            const cliArgs = remoteOnly ? [...args, '--remote', 'remote'] : args;
+            const { stdout, stderr, code } = await runPortalCli(tool, cliArgs);
+            if (code !== 0 && !stdout) return { label, results: [], error: cliError(stderr, code) };
+            try { return { label, results: (JSON.parse(stdout).results || []).map(r => ({ ...r, source: label, portal: tool })) }; }
+            catch { return { label, results: [], error: 'unreadable response' }; }
+          }));
+          const boards = outputs.map(o => ({ source: o.label, count: o.results.length, ...(o.error ? { error: o.error } : {}) }));
+          if (outputs.every(o => o.error)) {
+            res.writeHead(502, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: outputs.map(o => `${o.label}: ${o.error}`).join('; ') }));
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ portal: 'all', results: outputs.flatMap(o => o.results), boards, remoteApprox: !!remoteOnly }));
+          return;
+        }
+        if (!PORTAL_CLIS[portal]) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'This job board is only available in the Next.js version of the dashboard (web/, http://localhost:3001)' }));
+          return;
+        }
+        const tool = portal;
         // LinkedIn's public listings ignore the workplace-type filter, so for
         // remote-only searches also require the word "remote" in the posting
         const linkedinQuery = remoteOnly ? `${query} remote` : query;
@@ -452,7 +487,7 @@ const server = http.createServer(async (req, res) => {
     req.on('end', () => {
       try {
         const { title = '', company = '', description = '' } = JSON.parse(body || '{}');
-        if (!profile.builtin) {
+        if (!usesOriginalOwner(profile)) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(evaluateAgainstProfile(profile, { title, description })));
           return;

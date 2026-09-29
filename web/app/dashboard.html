@@ -173,10 +173,6 @@
             <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
             <input type="text" id="search-query-input" class="input" placeholder="Role or keyword, e.g. AI Engineer" value="Senior Full Stack Engineer">
           </label>
-          <select class="input select" id="search-portal-select" aria-label="Job board">
-            <option value="freehire">Freehire (Greenhouse, Lever, Ashby…)</option>
-            <option value="linkedin">LinkedIn</option>
-          </select>
           <select class="input select" id="search-location-select" aria-label="Region">
             <option value="Worldwide">Worldwide</option>
             <option value="APAC">APAC – Asia-Pacific</option>
@@ -196,6 +192,8 @@
         </div>
 
         <div id="search-status-bar" class="notice" hidden></div>
+
+        <div class="age-filter" id="age-filter" role="tablist" aria-label="Posted" hidden></div>
 
         <div class="job-grid" id="job-results-container"></div>
       </section>

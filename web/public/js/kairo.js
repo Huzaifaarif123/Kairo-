@@ -124,6 +124,7 @@ function parseProfileMarkdown(rawMd) {
 
   return {
     status: statusLine,
+    summary: section('Summary').split('\n').map(l => l.trim()).filter(Boolean).join(' '),
     experience,
     education: tableRows(section('Education')).map(r => ({ degree: r[0], period: r[1], school: r[2] })),
     languages: tableRows(md.match(/### Languages\s*\n([\s\S]*?)\n\n/)?.[1] || '').map(r => ({ name: r[0], level: r[1] })),
@@ -137,8 +138,8 @@ function parseProfileMarkdown(rawMd) {
 
 function renderProfile(p) {
   const body = document.getElementById('profile-body');
-  const md = p.rawMarkdown ? parseProfileMarkdown(p.rawMarkdown) : { experience: [], education: [], languages: [], projects: [], certifications: [] };
-  const name = p.name || p.label || 'Hassaan Nasir';
+  const md = p.rawMarkdown ? parseProfileMarkdown(p.rawMarkdown) : { summary: '', experience: [], education: [], languages: [], projects: [], certifications: [] };
+  const name = p.name || p.label || 'Your profile';
   const skillGroups = p.skillGroups ? p.skillGroups.map(g => [g.group, g.items]) : [
     ['Core', p.skills?.primary],
     ['AI & LLMs', p.skills?.ai],
@@ -153,7 +154,7 @@ function renderProfile(p) {
     <div class="drawer-identity">
       <div class="avatar avatar-xl">${escapeHtml(initials(name))}</div>
       <h2 id="drawer-name">${escapeHtml(name)}</h2>
-      <p class="drawer-title">${escapeHtml(p.title || 'Senior Full Stack & AI Engineer')}</p>
+      ${p.title ? `<p class="drawer-title">${escapeHtml(p.title)}</p>` : ''}
       ${md.status ? `<span class="open-badge"><i></i>${escapeHtml(md.status)}</span>` : ''}
     </div>
 
@@ -168,6 +169,12 @@ function renderProfile(p) {
       ${p.linkedin ? `<a href="${escapeHtml(p.linkedin)}" target="_blank" rel="noopener noreferrer">${ICONS.linkedin}<span>${escapeHtml(linkedinHandle)}</span>${ICONS.external}</a>` : ''}
       ${p.location ? `<div>${ICONS.pin}<span>${escapeHtml(p.location)}</span></div>` : ''}
     </div>
+
+    ${md.summary ? `
+    <section class="drawer-section">
+      <h3>Summary</h3>
+      <p class="drawer-summary">${escapeHtml(md.summary)}</p>
+    </section>` : ''}
 
     ${md.experience.length ? `
     <section class="drawer-section">
@@ -563,72 +570,48 @@ function handleDrop(event, targetStatus) {
 // Live Job Search Engine
 async function executeJobSearch() {
   const query = document.getElementById('search-query-input').value.trim();
-  const portal = document.getElementById('search-portal-select').value;
   const location = document.getElementById('search-location-select').value;
   const remoteOnly = document.getElementById('search-remote-only').checked;
   const statusBar = document.getElementById('search-status-bar');
   const button = document.getElementById('btn-run-search');
-  const portalName = portal === 'linkedin' ? 'LinkedIn' : 'Freehire';
-  let searchError = '';
 
   const where = `${remoteOnly ? 'remote roles in ' : ''}${escapeHtml(location)}`;
-  setNotice(statusBar, 'info', `Searching <strong>${portalName}</strong> for “${escapeHtml(query)}” — ${where}…`);
+  setNotice(statusBar, 'info', `Searching all job boards for “${escapeHtml(query)}” — ${where}…`);
   renderSearchSkeleton();
+  document.getElementById('age-filter').hidden = true;
+  activeAgeGroup = 'all';
   button.disabled = true;
 
+  let searchError = '';
   try {
     const res = await fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, portal, location, remoteOnly, limit: 9 })
+      body: JSON.stringify({ query, portal: 'all', location, remoteOnly, limit: 10, maxAgeDays: MAX_JOB_AGE_DAYS })
     });
-
     const data = await res.json().catch(() => ({}));
     if (res.ok) {
-      const results = (data.results || []).map(r => ({ ...r, portal: data.portal || portal }));
+      const results = data.results || [];
       renderSearchResults(results);
-      const caveat = data.remoteApprox
-        ? ' LinkedIn can’t filter by remote, so these are roles that mention “remote” — check each posting.'
-        : '';
-      setNotice(statusBar, data.remoteApprox ? 'warn' : 'info', `Found <strong>${results.length}</strong> live ${results.length === 1 ? 'role' : 'roles'} on ${portalName} — ${where}.${caveat}`);
+      const boards = data.boards || [];
+      const found = boards.filter(b => b.count > 0).map(b => `${escapeHtml(b.source)} ${b.count}`).join(' · ');
+      const failed = boards.filter(b => b.error);
+      let html = `Found <strong>${results.length}</strong> ${results.length === 1 ? 'role' : 'roles'} posted in the last ${MAX_JOB_AGE_DAYS} days across ${boards.length - failed.length} job boards — ${where}.`;
+      if (found) html += `<br><span class="board-counts">${found}</span>`;
+      if (failed.length) html += `<br>Not available right now: ${failed.map(b => escapeHtml(b.source)).join(', ')}.`;
+      if (data.remoteApprox) html += '<br>LinkedIn can’t filter by remote, so its results are roles that mention “remote” — check those postings.';
+      setNotice(statusBar, failed.length || data.remoteApprox ? 'warn' : 'info', html);
       button.disabled = false;
       return;
     }
-    searchError = data.error || `Server error ${res.status}`;
+    searchError = data.error || `server error ${res.status}`;
   } catch (e) {
-    console.warn('API fetch failed, falling back to sample listings', e);
-    searchError = 'The dashboard server is not reachable';
+    searchError = 'the dashboard server is not reachable';
   }
 
-  const fallbackResults = [
-    {
-      title: 'Senior Full Stack AI Engineer',
-      company: 'Deployly AI',
-      location: 'Remote',
-      url: 'https://www.linkedin.com/jobs/view/ai-engineer-at-deployly-ai-4447791646',
-      skills: ['python', 'django', 'react', 'next.js', 'claude code', 'mcp', 'aws'],
-      description: 'Building intelligent developer agent workflows with Python, Next.js, and Anthropic Claude APIs. High ownership of distributed architectures and asynchronous microservices.'
-    },
-    {
-      title: 'Senior Backend Engineer (Python / Distributed Systems)',
-      company: 'Nexus Scale Cloud',
-      location: 'Remote / UAE',
-      url: 'https://freehire.me/jobs/nexus-backend',
-      skills: ['python', 'drf', 'celery', 'redis', 'postgresql', 'docker', 'kubernetes'],
-      description: 'Lead backend microservices handling high-throughput event processing. 5+ years with Django/DRF, Celery, and database schema performance tuning.'
-    },
-    {
-      title: 'Full Stack Engineer (React, Next.js & Python)',
-      company: 'Quantis AI',
-      location: 'Remote',
-      url: 'https://freehire.me/jobs/quantis-fullstack',
-      skills: ['react', 'next.js', 'typescript', 'python', 'fastapi', 'tailwind css'],
-      description: 'Design intuitive, data-intensive web apps with Next.js and high-performance Python APIs. Deep focus on Core Web Vitals and clean state architecture.'
-    }
-  ];
-
-  renderSearchResults(fallbackResults);
-  setNotice(statusBar, 'warn', `<strong>Live search failed</strong> — ${escapeHtml(searchError)}. Showing sample listings instead.`);
+  // No sample listings: show what went wrong instead
+  renderSearchResults([]);
+  setNotice(statusBar, 'warn', `<strong>Live search failed</strong> — ${escapeHtml(searchError)}. Try again in a moment.`);
   button.disabled = false;
 }
 
@@ -654,20 +637,76 @@ function renderSearchSkeleton() {
     </div>`).join('');
 }
 
+// Job age groups (whole days since posting; search returns the last 7 days)
+const MAX_JOB_AGE_DAYS = 7;
+const AGE_GROUPS = [
+  { key: 'today', label: 'Today', tag: 'Posted today', test: d => d === 0 },
+  { key: '1', label: '1 day ago', tag: 'Posted 1 day ago', test: d => d === 1 },
+  { key: '2', label: '2 days ago', tag: 'Posted 2 days ago', test: d => d === 2 },
+  { key: '3-4', label: '3–4 days ago', tag: 'Posted 3–4 days ago', test: d => d >= 3 && d <= 4 },
+  { key: '5-7', label: '5–7 days ago', tag: 'Posted 5–7 days ago', test: d => d >= 5 && d <= MAX_JOB_AGE_DAYS }
+];
+let activeAgeGroup = 'all';
+
+function jobAgeDays(date) {
+  if (!date) return null;
+  const t = typeof date === 'number' ? (date < 1e12 ? date * 1000 : date) : Date.parse(date);
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86400000));
+}
+
+function ageGroupOf(job) {
+  const d = jobAgeDays(job.date);
+  return d === null ? null : AGE_GROUPS.find(g => g.test(d)) || null;
+}
+
+function setAgeGroup(key) {
+  activeAgeGroup = key;
+  renderSearchResults(searchResults);
+}
+
 function renderSearchResults(results) {
   const container = document.getElementById('job-results-container');
+  const filter = document.getElementById('age-filter');
   if (!container) return;
   searchResults = results;
 
   if (results.length === 0) {
-    container.innerHTML = `<div class="card empty" style="grid-column: 1 / -1">No roles found for this search. Try a broader keyword.</div>`;
+    filter.hidden = true;
+    container.innerHTML = `<div class="card empty" style="grid-column: 1 / -1">No jobs posted in the last ${MAX_JOB_AGE_DAYS} days for this search. Try a broader keyword or another region.</div>`;
     return;
   }
 
-  container.innerHTML = results.map((j, i) => {
-    const skills = (j.skills || []).map(s => String(s).replace(/-/g, ' '));
-    const desc = String(j.description || '').replace(/[*_#`>]+/g, '').replace(/\s+/g, ' ').trim();
-    return `
+  // Group while keeping each job's index into searchResults (used by Evaluate fit)
+  const groups = AGE_GROUPS.map(g => ({ ...g, items: [] }));
+  results.forEach((j, i) => {
+    const g = ageGroupOf(j);
+    const target = g ? groups.find(x => x.key === g.key) : null;
+    if (target) target.items.push(i);
+  });
+  if (activeAgeGroup !== 'all' && !groups.some(g => g.key === activeAgeGroup && g.items.length)) activeAgeGroup = 'all';
+
+  const total = groups.reduce((n, g) => n + g.items.length, 0);
+  filter.hidden = false;
+  filter.innerHTML = [
+    `<button class="age-chip ${activeAgeGroup === 'all' ? 'active' : ''}" role="tab" aria-selected="${activeAgeGroup === 'all'}" onclick="setAgeGroup('all')">All <span>${total}</span></button>`,
+    ...groups.filter(g => g.items.length).map(g =>
+      `<button class="age-chip ${activeAgeGroup === g.key ? 'active' : ''}" role="tab" aria-selected="${activeAgeGroup === g.key}" onclick="setAgeGroup('${g.key}')">${g.label} <span>${g.items.length}</span></button>`)
+  ].join('');
+
+  container.innerHTML = groups
+    .filter(g => g.items.length && (activeAgeGroup === 'all' || activeAgeGroup === g.key))
+    .map(g => `<h3 class="age-heading">${g.label} <span>${g.items.length} ${g.items.length === 1 ? 'job' : 'jobs'}</span></h3>` +
+      g.items.map(i => jobCardHtml(results[i], i, g.tag)).join(''))
+    .join('');
+}
+
+function jobCardHtml(j, i, ageTag) {
+  const skills = (j.skills || []).map(s => String(s).replace(/-/g, ' '));
+  const desc = String(j.description || '').replace(/\*\*|__|`|^#{1,6}\s+/gm, '').replace(/\s+/g, ' ').trim();
+  const place = String(j.location || 'Remote');
+  const allPlaces = Array.isArray(j.locations) && j.locations.length > 3 ? j.locations.join(', ') : place;
+  return `
       <div class="card job-card">
         <div class="job-head">
           <div class="logo">${escapeHtml(initials(j.company))}</div>
@@ -678,10 +717,12 @@ function renderSearchResults(results) {
         </div>
         <p class="job-desc">${desc ? escapeHtml(desc) : 'Open the posting to read the full description.'}</p>
         <div class="tags">
-          <span class="tag">${escapeHtml(j.location || 'Remote')}</span>
+          ${ageTag ? `<span class="tag tag-age">${escapeHtml(ageTag)}</span>` : ''}
+          ${j.source ? `<span class="tag tag-source">via ${escapeHtml(j.source)}</span>` : ''}
+          <span class="tag" title="${escapeHtml(allPlaces)}">${escapeHtml(place)}</span>
           ${j.countries && j.countries.length > 1 ? `<span class="tag" title="${escapeHtml(j.countries.map(c => c.toUpperCase()).join(', '))}">+${j.countries.length - 1} more ${j.countries.length === 2 ? 'location' : 'locations'}</span>` : ''}
           ${j.work_mode === 'remote' ? '<span class="tag">Remote</span>' : ''}
-          ${skills.slice(0, 5).map(s => `<span class="tag">${escapeHtml(s)}</span>`).join('')}
+          ${skills.slice(0, 4).map(s => `<span class="tag">${escapeHtml(s)}</span>`).join('')}
         </div>
         <div class="job-foot">
           ${j.url ? `<a href="${escapeHtml(j.url)}" target="_blank" rel="noopener noreferrer">View posting ${ICONS.external}</a>` : '<span></span>'}
@@ -689,7 +730,6 @@ function renderSearchResults(results) {
         </div>
       </div>
     `;
-  }).join('');
 }
 
 async function evaluateSearchResult(i) {
@@ -1176,7 +1216,7 @@ async function initProfiles() {
   }
   applyProfileIdentity();
   const current = currentProfile();
-  if (current && !current.builtin) {
+  if (current && !current.original) {
     document.getElementById('search-query-input').value = current.title;
   }
 }
@@ -1196,7 +1236,11 @@ function applyProfileIdentity() {
   document.getElementById('side-role').textContent = role;
   document.getElementById('top-avatar').textContent = initials;
   document.title = `Job Engine | ${name}`;
-  document.body.dataset.builtin = p && !p.builtin ? 'false' : 'true';
+  // Hassaan's hand-written CV Studio, Interview and sample evaluation only show while
+  // the main profile still holds his details (not after someone else's CV is imported)
+  const original = !p || p.original ? 'true' : 'false';
+  if (original === 'false' && document.body.dataset.builtin !== 'false') resetEvaluator();
+  document.body.dataset.builtin = original;
   document.querySelectorAll('.profile-custom-name').forEach(el => { el.textContent = name; });
 }
 
@@ -1283,7 +1327,7 @@ async function switchProfile(id) {
   renderDashboard();
 
   const p = currentProfile();
-  document.getElementById('search-query-input').value = p && !p.builtin ? p.title : 'Senior Full Stack Engineer';
+  document.getElementById('search-query-input').value = p && !p.original ? p.title : 'Senior Full Stack Engineer';
   if (document.getElementById('tab-search').classList.contains('active')) executeJobSearch();
 
   showToast(`Switched to ${p ? (p.name || p.label) : 'profile'}${p && !p.complete ? ' — this profile is still empty' : ''}`);
@@ -1391,8 +1435,10 @@ function loadScript(src) {
     loadedScripts[src] = new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.src = src;
-      s.onload = resolve;
-      s.onerror = () => { delete loadedScripts[src]; reject(new Error('Could not load the file reader. Check your internet connection.')); };
+      const fail = () => { delete loadedScripts[src]; s.remove(); reject(new Error('Could not load the CV reader. Check your internet connection and try again.')); };
+      const timer = setTimeout(fail, 30000);
+      s.onload = () => { clearTimeout(timer); resolve(); };
+      s.onerror = () => { clearTimeout(timer); fail(); };
       document.head.appendChild(s);
     });
   }
@@ -1424,32 +1470,78 @@ async function handleCvFile(input) {
     return;
   }
 
-  showToast('Reading your CV…');
+  // Stays visible until reading finishes (PDF/Word readers load on first use)
+  showToast(`Reading ${file.name}…`, 60000);
   try {
-    const text = await extractCvText(file);
-    if (text.replace(/\s/g, '').length < 80) {
-      throw new Error('No readable text found in this file. If it is a scanned PDF, upload a Word or text version instead.');
-    }
-    const cv = parseCvText(text);
+    const cv = await readCv(file);
     await openProfileEditor(buildProfileMarkdown(cv, profileData && profileData.rawMarkdown), importSummary(cv, file.name));
+    showToast('CV read. Review the details, then click Save profile.', 4000);
   } catch (err) {
     console.warn('CV import failed', err);
-    showToast(err.message || 'Could not read this CV');
+    showToast(friendlyCvError(err), 8000);
   }
+}
+
+function friendlyCvError(err) {
+  const name = (err && err.name) || '';
+  const msg = (err && err.message) || '';
+  if (name === 'PasswordException' || /password/i.test(msg)) {
+    return 'This PDF is password-protected. Save a copy without the password, then upload that.';
+  }
+  if (name === 'InvalidPDFException' || /invalid pdf|pdf structure|missing pdf/i.test(msg)) {
+    return 'This PDF looks damaged or isn\'t a real PDF. Try exporting it again, or upload the Word version.';
+  }
+  if (/end of central directory|corrupted zip|could not find file|can't find end/i.test(msg)) {
+    return 'This Word file couldn\'t be opened. Save it again as .docx (or PDF) and retry.';
+  }
+  return msg || 'Could not read this CV';
+}
+
+// Parse every text reconstruction of the file and keep the one that reads best
+async function readCv(file) {
+  const candidates = await extractCvCandidates(file);
+  let best = null;
+  for (const text of candidates) {
+    if (text.replace(/\s/g, '').length < 80) continue;
+    let cv;
+    try { cv = parseCvText(text); } catch (e) { console.warn('CV parse attempt failed', e); continue; }
+    const score = cvScore(cv);
+    if (!best || score > best.score) best = { cv, score };
+  }
+  if (!best) throw new Error('No readable text found in this file. If it is a scanned PDF, upload a Word or text version instead.');
+  return best.cv;
+}
+
+function cvScore(cv) {
+  return (cv.name ? 10 : 0) + cv.experience.length * 8
+    + cv.experience.reduce((n, j) => n + Math.min(j.bullets.length, 12) + (j.company !== 'Company' ? 2 : 0), 0)
+    + cv.education.length * 4 + cv.projects.length * 2 + cv.languages.length + cv.certifications.length
+    + Math.min(cv.skills.reduce((n, g) => n + g.items.length, 0), 40) * 0.25 + (cv.summary ? 3 : 0);
 }
 
 // ---------- Text extraction ----------
 
+// All plausible text versions of the file (PDFs with two columns can be read
+// row by row or column by column; the parser decides which reads better)
+async function extractCvCandidates(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.pdf') || file.type === 'application/pdf') {
+    const { merged, split } = await extractPdfVariants(file);
+    return split ? [merged, split] : [merged];
+  }
+  return [await extractCvText(file)];
+}
+
 async function extractCvText(file) {
   const name = file.name.toLowerCase();
-  if (name.endsWith('.pdf') || file.type === 'application/pdf') return extractPdfText(file);
+  if (name.endsWith('.pdf') || file.type === 'application/pdf') return (await extractPdfVariants(file)).merged;
   if (name.endsWith('.docx')) return extractDocxText(file);
   if (name.endsWith('.doc')) throw new Error('Old .doc files aren\'t supported. Save it as .docx or PDF and try again.');
   if (/\.(txt|md|markdown|text)$/.test(name) || file.type.startsWith('text/')) return file.text();
   throw new Error('Please upload a PDF, Word (.docx) or text file.');
 }
 
-async function extractPdfText(file) {
+async function extractPdfVariants(file) {
   await loadScript(CV_LIBS.pdf);
   const pdfjs = window.pdfjsLib;
   pdfjs.GlobalWorkerOptions.workerSrc = CV_LIBS.pdfWorker;
@@ -1463,13 +1555,35 @@ async function extractPdfText(file) {
       if (a.url && /linkedin\.com|github\.com/i.test(a.url)) links.add(a.url);
     }
   }
-  return pages.join('\n') + (links.size ? `\n${[...links].join('\n')}` : '');
+  const running = runningLines(pages.map(p => p.merged));
+  const clean = lines => lines.filter(l => !running.has(l.trim()) && !/^(page\s*)?\d{1,3}\s*(\/|of)\s*\d{1,3}$/i.test(l.trim()) && !/^page\s*\d{1,3}$/i.test(l.trim()));
+  const tail = links.size ? `\n${[...links].join('\n')}` : '';
+  const merged = pages.map(p => clean(p.merged).join('\n')).join('\n') + tail;
+  const split = pages.some(p => p.split) ? pages.map(p => clean(p.split || p.merged).join('\n')).join('\n') + tail : null;
+  return { merged, split };
+}
+
+// Lines repeated at the top or bottom of several pages (running headers/footers)
+function runningLines(pageLines) {
+  const seen = new Map();
+  if (pageLines.length < 2) return new Set();
+  for (const lines of pageLines) {
+    const edge = new Set([...lines.slice(0, 2), ...lines.slice(-2)].map(l => l.trim().replace(/\d+/g, '#')).filter(Boolean));
+    for (const l of edge) seen.set(l, (seen.get(l) || 0) + 1);
+  }
+  const repeated = new Set([...seen].filter(([, n]) => n >= 2).map(([l]) => l));
+  const out = new Set();
+  for (const lines of pageLines) for (const l of lines) if (repeated.has(l.trim().replace(/\d+/g, '#'))) out.add(l.trim());
+  return out;
 }
 
 // Rebuild reading-order lines from positioned PDF text. Large horizontal gaps
 // (separate columns, e.g. dates beside a job title) become triple spaces.
+// Returns the page read row by row ("merged") and, when a second column is found,
+// column by column ("split": the fuller column first, then the other)
 function pdfItemsToLines(items) {
   const rows = [];
+  const colX = detectColumn(items);
   for (const it of items) {
     if (!it.str || !it.str.trim()) continue;
     const y = it.transform[5];
@@ -1479,21 +1593,69 @@ function pdfItemsToLines(items) {
     row.items.push({ x: it.transform[4], w: it.width, s: it.str });
   }
   rows.sort((a, b) => b.y - a.y);
-  return rows.map(r => {
-    r.items.sort((a, b) => a.x - b.x);
+  const joinRow = (r, list) => {
     let line = '';
     let end = null;
-    for (const it of r.items) {
+    for (const it of list) {
       if (end !== null) {
         const gap = it.x - end;
-        if (gap > r.size * 2) line += '   ';
+        // Text starting at the page's second column (e.g. job details beside dates)
+        const atColumn = colX !== null && Math.abs(it.x - colX) <= 3 && gap > 1;
+        if (gap > r.size * 2 || atColumn) line += '   ';
         else if (gap > r.size * 0.15 && !line.endsWith(' ') && !it.s.startsWith(' ')) line += ' ';
       }
       line += it.s;
       end = it.x + it.w;
     }
     return line.trim();
-  }).join('\n');
+  };
+  const merged = rows.map(r => { r.items.sort((a, b) => a.x - b.x); return joinRow(r, r.items); }).filter(Boolean);
+  if (colX === null) return { merged, split: null };
+  const left = [], right = [];
+  for (const r of rows) {
+    const l = joinRow(r, r.items.filter(it => it.x < colX - 3));
+    const rt = joinRow(r, r.items.filter(it => it.x >= colX - 3));
+    if (l) left.push(l);
+    if (rt) right.push(rt);
+  }
+  const chars = a => a.join('').length;
+  const split = chars(left) >= chars(right) ? [...left, ...right] : [...right, ...left];
+  return { merged, split };
+}
+
+// Many CV templates have a narrow left column (dates, labels, project names) and a
+// wide right column. Find the x position where the right column starts: the place
+// most often reached by a line's second piece of text.
+function detectColumn(items) {
+  // Rows of text (same baseline), each with its item x positions sorted
+  const rows = [];
+  for (const it of items) {
+    if (!it.str || !it.str.trim()) continue;
+    const y = it.transform[5];
+    const size = Math.abs(it.transform[0]) || 10;
+    let row = rows.find(r => Math.abs(r.y - y) < size * 0.5);
+    if (!row) rows.push(row = { y, xs: [] });
+    row.xs.push(Math.round(it.transform[4]));
+  }
+  if (rows.length < 6) return null;
+  const minX = Math.min(...rows.map(r => Math.min(...r.xs)));
+  // Candidate column starts: text that begins a new column within a row, or a row
+  // that starts well to the right of the page margin (a sidebar or second column)
+  const counts = new Map();
+  const add = x => { const k = Math.round(x / 2) * 2; counts.set(k, (counts.get(k) || 0) + 1); };
+  for (const r of rows) {
+    r.xs.sort((a, b) => a - b);
+    for (const x of new Set(r.xs.slice(1))) if (x > minX + 30) add(x);
+    if (r.xs[0] > minX + 30) add(r.xs[0]);
+  }
+  // Merge neighbouring positions (±3pt) and pick the strongest
+  let best = null;
+  for (const [x] of counts) {
+    let n = 0;
+    for (const [x2, c] of counts) if (Math.abs(x2 - x) <= 3) n += c;
+    if (n >= 4 && (!best || n > best.n)) best = { x, n };
+  }
+  return best ? best.x : null;
 }
 
 async function extractDocxText(file) {
@@ -1516,33 +1678,69 @@ const CV_SECTIONS = [
 ];
 
 const MONTH = '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\\.?';
-const CV_DATE = `(?:${MONTH}\\s*,?\\s*)?(?:19|20)\\d{2}|\\d{1,2}[/.](?:19|20)\\d{2}`;
+const CV_DATE = `(?:${MONTH}\\s*,?\\s*)?(?:19|20)\\d{2}|\\d{1,2}[/.](?:19|20)\\d{2}|${MONTH}\\s*['’]\\s*\\d{2}`;
+const SINCE_RE = new RegExp(`\\b(?:since|from)\\s+((?:${MONTH}\\s*)?(?:19|20)\\d{2})`, 'i');
+const DURATION_RE = /\(?\s*\d+\s*(?:yrs?|years?)(?:\s*\d+\s*(?:mos?|months?))?\s*\)?|\(?\s*\d+\s*(?:mos?|months?)\s*\)?/gi;
 const RANGE_RE = new RegExp(`(${CV_DATE})\\s*(?:–|—|-|to|until)+\\s*(${CV_DATE}|present|current|now|today|ongoing)`, 'i');
 const YEAR_RE = /(?:19|20)\d{2}/g;
 
 const ROLE_WORDS = /\b(engineer|developer|designer|manager|analyst|lead|architect|consultant|scientist|intern|specialist|director|officer|administrator|devops|sre|head|founder|co-founder|coordinator|associate|executive|programmer|researcher|technician|product owner|owner|assistant|trainee|freelancer|contractor|tester|qa)\b/i;
 const PLACE_WORDS = /\b(remote|hybrid|on-?site|pakistan|uae|united arab emirates|dubai|abu dhabi|india|usa|united states|uk|united kingdom|england|germany|canada|australia|singapore|saudi arabia|ksa|qatar|egypt|netherlands|france|spain|italy|ireland|sweden|poland|turkey|türkiye|china|japan|nigeria|kenya|south africa|bangladesh|sri lanka|malaysia|indonesia|philippines|new zealand|switzerland|austria|belgium|denmark|norway|finland|portugal|brazil|mexico|lahore|karachi|islamabad|london|berlin|new york|toronto|sydney|bangalore|bengaluru|mumbai|delhi|hyderabad|riyadh|doha|cairo)\b/i;
-const EDU_WORDS = /\b(bachelor|master|b\.?\s?sc|m\.?\s?sc|bsc|msc|b\.?s\.?|m\.?s\.?|b\.?a\.?|m\.?a\.?|mba|ph\.?\s?d|doctorate|diploma|associate degree|b\.?\s?tech|m\.?\s?tech|b\.?\s?e\.?|beng|meng|bcs|bscs|mcs|a-?levels?|o-?levels?|intermediate|matric(ulation)?|hssc|ssc|high school|fsc|ics)\b/i;
-const SCHOOL_WORDS = /\b(university|college|institute|school|academy|polytechnic|nuces|fast|lums|nust|comsats|iit|mit)\b/i;
+const EDU_WORDS = /\b(bachelor'?s?|master'?s?|b\.?\s?sc|m\.?\s?sc|bsc|msc|b\.?s\.?|m\.?s\.?|b\.?a\.?|m\.?a\.?|mba|ph\.?\s?d|doctorate|diploma|associate degree|b\.?\s?tech|m\.?\s?tech|b\.?\s?e\.?|beng|meng|bcs|bscs|mcs|a-?levels?|o-?levels?|intermediate|matric(ulation)?|hssc|ssc|high school|fsc|ics)\b/i;
+const SCHOOL_WORDS = /\b(universit(?:y|ies)|colleges?|institutes?|schools?|academ(?:y|ies)|polytechnic|nuces|fast|lums|nust|comsats|iit|mit)\b/i;
 
 const BULLET_RE = /^\s*(?:[\p{So}\p{Co}•●▪■◦‣∙·➢➤►▶✓✔]\s*|[*\-–—]\s+|\d+[.)]\s+)/u;
 
 // Lines that read like an achievement rather than a job title / company
-const ACTION_START = /^(built|led|leading|designed|developed|created|implemented|managed|wrote|written|cut|reduced|improved|increased|modell?ed|mentored|delivered|launched|owned|drove|introduced|migrated|automated|optimi[sz]ed|architected|maintained|collaborated|worked|responsible|supported|established|spearheaded|streamlined|engineered|analy[sz]ed|coordinated|conducted|achieved|integrated|deployed|shipped|scaled|partnered|researched|tested|trained|oversaw|handled|prepared|produced|planned|organi[sz]ed|contributed|assisted|helped|ran|set up|refactored)\b/i;
+const ACTION_START = /^(rebuilt|redesigned|reworked|revamped|grew|expanded|lowered|raised|boosted|accelerated|enabled|defined|drafted|facilitated|negotiated|presented|published|secured|simplified|standardi[sz]ed|transformed|unified|upgraded|validated|taught|rolled out|won|cut|built|led|leading|designed|developed|created|implemented|managed|wrote|written|cut|reduced|improved|increased|modell?ed|mentored|delivered|launched|owned|drove|introduced|migrated|automated|optimi[sz]ed|architected|maintained|collaborated|worked|responsible|supported|established|spearheaded|streamlined|engineered|analy[sz]ed|coordinated|conducted|achieved|integrated|deployed|shipped|scaled|partnered|researched|tested|trained|oversaw|handled|prepared|produced|planned|organi[sz]ed|contributed|assisted|helped|ran|set up|refactored)\b/i;
 
 function cleanLine(l) {
   return l.replace(/ /g, ' ').replace(/[​﻿]/g, '').replace(/[ \t]+$/g, '');
 }
 
+// Headings compared with spaces and punctuation removed, so letter-spaced
+// headings like "E XP ER I EN C E" or "S K IL LS" are recognised too
+const CV_HEADINGS = {
+  summary: ['summary', 'profile', 'professionalsummary', 'careersummary', 'professionalprofile', 'aboutme', 'about', 'objective', 'careerobjective', 'overview', 'personalstatement'],
+  experience: ['experience', 'workexperience', 'professionalexperience', 'relevantexperience', 'employmenthistory', 'employment', 'workhistory', 'careerhistory'],
+  education: ['education', 'academicbackground', 'academicqualifications', 'qualifications', 'educationandtraining'],
+  contact: ['contact', 'contactinfo', 'contactinformation', 'contactdetails', 'personaldetails', 'personalinformation', 'personalinfo'],
+  skills: ['skills', 'topskills', 'technicalskills', 'coreskills', 'keyskills', 'corecompetencies', 'competencies', 'expertise', 'technologies', 'techstack', 'skillsandtools', 'skillsandtechnologies', 'toolsandtechnologies', 'tools'],
+  projects: ['projects', 'keyprojects', 'selectedprojects', 'personalprojects', 'featuredprojects', 'sideprojects', 'independentprojects', 'academicprojects', 'notableprojects', 'portfolio'],
+  certifications: ['certifications', 'certification', 'certificates', 'licenses', 'licensesandcertifications', 'coursesandcertifications', 'courses', 'training'],
+  languages: ['languages', 'language', 'languageskills'],
+  ignore: ['awards', 'honors', 'honours', 'awardsandhonors', 'interests', 'hobbies', 'references', 'publications', 'volunteering', 'volunteerexperience', 'achievements', 'activities']
+};
+
 function sectionOf(line) {
   const t = line.trim().replace(/[:：]$/, '').replace(/\s+/g, ' ').toLowerCase();
-  if (!t || t.split(' ').length > 5) return null;
+  if (!t || t.length > 45) return null;
+  const letterSpaced = /^[a-z&]+( +[a-z&]+)+$/.test(t) && t.split(' ').filter(w => w.length <= 2).length >= 2;
+  if (!letterSpaced && t.split(' ').length > 5) return null;
   for (const [name, re] of CV_SECTIONS) if (re.test(t)) return name;
+  const squashed = t.replace(/&/g, 'and').replace(/[^a-z]/g, '');
+  for (const [name, list] of Object.entries(CV_HEADINGS)) if (list.includes(squashed)) return name;
   return null;
 }
 
+// In two-column layouts a date range often wraps: "Feb 2026 –" on one line and
+// "Present" (or "2026") at the start of the next. Put the range back together.
+function joinSplitRanges(lines) {
+  const startRe = new RegExp(`^(.*?)(${CV_DATE})\\s*[–—-]\\s*(${MONTH})?\\s*?((?:\\s{3,}|\\s+(?=[A-Z])).*)?$`, 'i');
+  const endRe = /^\s*((?:19|20)\d{2}|present|current|now|today|ongoing)\b(\s*\(expected\))?\s*(.*)$/i;
+  for (let i = 0; i < lines.length - 1; i++) {
+    const a = lines[i].match(startRe);
+    if (!a || RANGE_RE.test(lines[i])) continue;
+    const b = lines[i + 1].match(endRe);
+    if (!b) continue;
+    lines[i] = `${a[1]}${a[2]} – ${a[3] ? a[3] + ' ' : ''}${b[1]}${a[4] ? a[4] : ''}`;
+    lines[i + 1] = b[3] ? `   ${b[3]}` : '';
+  }
+  return lines;
+}
+
 function parseCvText(raw) {
-  const lines = raw.split(/\r?\n/).map(cleanLine);
+  const lines = joinSplitRanges(raw.split(/\r?\n/).map(cleanLine));
   const sections = { header: [] };
   let current = 'header';
   for (const line of lines) {
@@ -1565,6 +1763,11 @@ function parseCvText(raw) {
     .find(p => p.replace(/\D/g, '').length >= 9 && !RANGE_RE.test(p)) || '';
 
   const header = parseHeader(sections.header.filter(l => l.trim()), { email, phone });
+  // Sidebar "Contact" blocks often hold the location
+  if (!header.location && sections.contact) {
+    const place = sections.contact.flatMap(l => splitSegments(l.trim())).find(seg => PLACE_WORDS.test(seg) && !/@|https?:|www\./i.test(seg) && seg.length <= 60);
+    if (place) header.location = place;
+  }
 
   return {
     ...header,
@@ -1587,7 +1790,15 @@ function isContactish(s, contact) {
 }
 
 function splitSegments(line) {
-  return line.split(/\s*[|•·●▪]\s*|\s{3,}/).map(s => s.trim()).filter(Boolean);
+  return line.split(/\s*[|•·●▪]\s*|\s{3,}|\s+[—–]\s+|\s+-\s+/)
+    // Icon-font glyphs (phone, mail, GitHub icons) come through as stray symbols
+    .map(s => s.replace(/^[^\p{L}\p{N}+(]+/u, '').replace(/[\p{Co}]/gu, '').trim())
+    .filter(Boolean);
+}
+
+// "HuzaifaArif" (letter-spaced PDF text) -> "Huzaifa Arif"
+function unsquashName(seg) {
+  return /^[A-Z][a-z]+(?:[A-Z][a-z]+){1,3}$/.test(seg) ? seg.replace(/([a-z])([A-Z])/g, '$1 $2') : seg;
 }
 
 function parseHeader(lines, contact) {
@@ -1596,8 +1807,9 @@ function parseHeader(lines, contact) {
   let location = '';
   const segments = lines.slice(0, 10).flatMap(l => splitSegments(l.trim()));
 
-  for (const seg of segments) {
-    if (isContactish(seg, contact)) continue;
+  for (const rawSeg of segments) {
+    if (isContactish(rawSeg, contact)) continue;
+    const seg = unsquashName(rawSeg);
     if (!name && /^[A-Za-zÀ-ÿ.'’-]+(?:\s+[A-Za-zÀ-ÿ.'’-]+){1,3}$/.test(seg) && !ROLE_WORDS.test(seg) && !PLACE_WORDS.test(seg) && /[A-Z]/.test(seg[0])) {
       name = seg.split(/\s+/).map(w => (w === w.toUpperCase() && w.length > 2 ? w[0] + w.slice(1).toLowerCase() : w)).join(' ');
       continue;
@@ -1614,7 +1826,14 @@ function parseHeader(lines, contact) {
 }
 
 function normalisePeriod(match) {
-  const year = s => (s.match(/(?:19|20)\d{2}/) || [''])[0];
+  const year = s => {
+    const full = s.match(/(?:19|20)\d{2}/);
+    if (full) return full[0];
+    const short = s.match(/['’]\s*(\d{2})/);
+    if (!short) return '';
+    const yy = Number(short[1]);
+    return String(yy <= (new Date().getFullYear() % 100) + 1 ? 2000 + yy : 1900 + yy);
+  };
   const end = /present|current|now|today|ongoing/i.test(match[2]) ? 'Present' : year(match[2]);
   return `${year(match[1])} – ${end}`;
 }
@@ -1625,7 +1844,7 @@ function parseExperience(lines) {
   let pendingHeader = [];
 
   const startJob = (headerParts, period) => {
-    job = { headerParts, period, bullets: [], extraHeader: 0 };
+    job = { headerParts, period, bullets: [], extraHeader: 0, marked: 0, unmarkedBeforeMarked: 0 };
     jobs.push(job);
   };
 
@@ -1636,11 +1855,13 @@ function parseExperience(lines) {
     const line = rawLine.trim();
     // Skip empty lines and stray bullet symbols on their own line
     if (!line || !line.replace(BULLET_RE, '').trim()) continue;
-    const range = line.match(RANGE_RE);
+    let range = line.match(RANGE_RE);
+    const since = !range && line.match(SINCE_RE);
+    if (since) range = Object.assign([since[0], since[1], 'Present'], { index: since.index });
     const isBullet = BULLET_RE.test(line);
 
     if (range && !isBullet) {
-      const rest = line.replace(range[0], ' ').replace(/[()]/g, ' ').replace(/\s{2,}/g, '   ').trim();
+      const rest = line.replace(range[0], ' ').replace(DURATION_RE, ' ').replace(/[()]/g, ' ').replace(/\(?expected\)?/i, ' ').replace(/\s{2,}/g, '   ').trim();
       const parts = [...pendingHeader];
       if (rest) parts.push(rest);
       startJob(parts, normalisePeriod(range));
@@ -1649,7 +1870,11 @@ function parseExperience(lines) {
     }
 
     if (isBullet) {
-      if (job) job.bullets.push(line.replace(BULLET_RE, '').trim());
+      if (job) {
+        if (!job.marked) job.unmarkedBeforeMarked = job.bullets.length;
+        job.marked++;
+        job.bullets.push(line.replace(BULLET_RE, '').trim());
+      }
       pendingHeader = [];
       continue;
     }
@@ -1671,6 +1896,12 @@ function parseExperience(lines) {
       pendingHeader.push(line);
       if (pendingHeader.length > 3) pendingHeader.shift();
     }
+  }
+
+  // When a job uses bullet markers, the unmarked lines above the first marker are
+  // a company description (e.g. an italic "About the company" line), not achievements
+  for (const j of jobs) {
+    if (j.marked && j.unmarkedBeforeMarked) j.bullets = j.bullets.slice(j.unmarkedBeforeMarked);
   }
 
   return jobs.map(j => {
@@ -1701,8 +1932,13 @@ function parseEducation(lines) {
     const schoolPart = () => (splitSegments(line).find(p => SCHOOL_WORDS.test(p)) || line)
       .replace(RANGE_RE, '').replace(YEAR_RE, '').replace(/[|,–-]+\s*$/, '').trim();
     if (EDU_WORDS.test(line)) {
-      const pieces = line.split(/\s*(?:\||·|•|—|–|\s-\s|,\s|\s{3,})\s*/).map(s => s.trim()).filter(Boolean);
-      const degree = (pieces.find(p => EDU_WORDS.test(p)) || line).replace(RANGE_RE, '').replace(YEAR_RE, '').replace(/[()]/g, '').trim();
+      const pieces = line.split(/\s*(?:\||·|•|—|–|\s-\s|,\s|\.\s(?=[A-Z])|\s{3,})\s*/).map(s => s.trim()).filter(Boolean);
+      // The degree is everything before the institution: "Bachelor of Science, Computer Science"
+      const schoolAt = pieces.findIndex(p => SCHOOL_WORDS.test(p) && !EDU_WORDS.test(p));
+      const degreeStart = pieces.findIndex(p => EDU_WORDS.test(p));
+      const degreeParts = pieces.slice(degreeStart, schoolAt > degreeStart ? schoolAt : degreeStart + 1)
+        .filter(p => !PLACE_WORDS.test(p) && !RANGE_RE.test(p) && !/^\(?(?:19|20)\d{2}/.test(p));
+      const degree = (degreeParts.join(', ') || line).replace(RANGE_RE, '').replace(YEAR_RE, '').replace(/[()]/g, '').replace(/[.,]\s*$/, '').trim();
       const school = pieces.find(p => SCHOOL_WORDS.test(p) && !EDU_WORDS.test(p)) || '';
       if (entry && !entry.degree) {
         entry.degree = degree;
@@ -1731,10 +1967,20 @@ function parseSkills(lines) {
   const groups = [];
   const loose = [];
   let lastGroup = null;
-  for (const rawLine of lines) {
+  const nextText = i => { for (let k = i + 1; k < lines.length; k++) if (lines[k].trim()) return lines[k]; return ''; };
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
     const line = rawLine.replace(BULLET_RE, '').trim();
     if (!line) { lastGroup = null; continue; }
-    const labelled = line.match(/^([^:]{2,40}):\s*(.+)$/);
+    // A short heading on its own line ("Cloud & DevOps") followed by a comma list
+    if (!/[,;:]/.test(line) && line.split(/\s+/).length <= 6 && !/[.]$/.test(line) && /[,;]/.test(nextText(i))) {
+      lastGroup = { label: line.replace(/\*\*/g, ''), items: [] };
+      groups.push(lastGroup);
+      continue;
+    }
+    const labelled = line.match(/^([^:]{2,40}):\s*(.+)$/)
+      || line.match(/^([^,:]{2,30}?)\s{3,}(.+[,;].+)$/)
+      || line.match(/^((?:programming )?languages|concepts|technologies|frameworks|libraries|databases|data tools|tools|cloud|devops|platforms|frontend|backend|testing|soft skills|methodologies|other)\s+(.+[,;].+)$/i);
     const split = s => s.split(/\s*(?:,|;|\||•|·|●|▪|\s{3,})\s*/).map(x => x.replace(/\*\*/g, '').replace(/\.$/, '').trim()).filter(x => x && x.length <= 50);
     if (labelled) {
       lastGroup = { label: labelled[1].replace(/\*\*/g, '').trim(), items: split(labelled[2]) };
@@ -1751,12 +1997,22 @@ function parseSkills(lines) {
 }
 
 function parseProjects(lines) {
+  const columned = lines.filter(l => /\S\s{3,}\S/.test(l)).length >= 2;
+  if (columned) return parseColumnProjects(lines);
   const projects = [];
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line) continue;
     const text = line.replace(BULLET_RE, '').trim();
-    const named = text.match(/^([^:–—]{2,60})\s*[:–—]\s+(.+)$/);
+    // A wrapped line (starts in lowercase) continues the previous project
+    if (projects.length && /^[a-z(]/.test(text) && !BULLET_RE.test(line)) {
+      const last = projects[projects.length - 1];
+      last.desc = `${last.desc} ${text}`.trim();
+      continue;
+    }
+    const named = text.match(/^([^:–—]{2,60})\s*[:–—]\s+(.+)$/)
+      || (/^(.{2,40}?)\.\s+[A-Z]/.test(text) && text.match(/^(.{2,40}?)\.\s+([A-Z].+)$/)?.[1].split(/\s+/).length <= 5
+        ? text.match(/^(.{2,40}?)\.\s+([A-Z].+)$/) : null);
     const last = projects[projects.length - 1];
     if (named) projects.push({ name: named[1].trim(), desc: named[2].trim() });
     else if (text.split(/\s+/).length <= 6 && !/[.]$/.test(text)) projects.push({ name: text, desc: '' });
@@ -1764,6 +2020,28 @@ function parseProjects(lines) {
     else projects.push({ name: text.split(/\s+/).slice(0, 4).join(' '), desc: text });
   }
   return projects;
+}
+
+// Name in the left column, description in the right; both may wrap over lines
+function parseColumnProjects(lines) {
+  const projects = [];
+  let current = null;
+  for (const rawLine of lines) {
+    if (!rawLine.trim()) continue;
+    const m = rawLine.match(/^\s*(\S.*?)\s{3,}(.*)$/);
+    const left = m ? m[1].replace(BULLET_RE, '').trim() : (rawLine.startsWith('   ') ? '' : null);
+    const right = m ? m[2].trim() : rawLine.trim();
+    const startsNew = left && (!current || /[.!]$/.test(current.desc));
+    if (left === null && !current) { current = { name: right, desc: '' }; projects.push(current); continue; }
+    if (startsNew) {
+      current = { name: left, desc: right };
+      projects.push(current);
+    } else if (current) {
+      if (left) current.name = `${current.name} ${left}`;
+      current.desc = `${current.desc} ${right}`.trim();
+    }
+  }
+  return projects.map(p => ({ name: p.name.replace(/\s+/g, ' ').trim(), desc: p.desc.replace(/\s+/g, ' ').trim() }));
 }
 
 function parseLanguages(lines) {
