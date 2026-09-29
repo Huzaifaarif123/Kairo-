@@ -3,13 +3,16 @@
 // `activeProfile` via apiUrl().
 
 let profilesList = [];
+let profilesLoadFailed = false;
 
 async function initProfiles() {
   try {
     const res = await fetch('/api/profiles');
     if (res.ok) profilesList = await res.json();
+    else profilesLoadFailed = true;
   } catch (e) {
     console.warn('Profiles unavailable', e);
+    profilesLoadFailed = true;
   }
   if (!profilesList.some(p => p.id === activeProfile)) {
     activeProfile = 'default';
@@ -81,6 +84,7 @@ function renderProfileMenu() {
   const items = profilesList.length ? profilesList : [{ id: 'default', name: 'Hassaan Nasir', title: 'Senior Full Stack & AI Engineer', initials: 'HN', complete: true }];
   menu.innerHTML = `
     <div class="pm-label">Switch profile</div>
+    ${profilesLoadFailed ? '<div class="pm-error">Couldn’t load the other profiles from the server. If this is the live site, check that the app is deployed from the <code>web</code> folder.</div>' : ''}
     ${items.map(p => `
       <button class="pm-item ${p.id === activeProfile ? 'active' : ''}" onclick="switchProfile('${p.id}')" role="menuitemradio" aria-checked="${p.id === activeProfile}">
         <span class="avatar pm-avatar">${escapeHtml(p.initials)}</span>

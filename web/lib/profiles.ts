@@ -8,6 +8,8 @@ import path from 'node:path';
 import { ROOT, usingRedis, kvGet, kvSet, readFile, writeFile } from './store';
 import { parseCSV, stringifyCSV, TRACKER_HEADERS, type Row } from './csv';
 import { parseProfile, analyseJob, yearsOfExperience } from './tailor.js';
+import bundledRegistry from '../../profiles/profiles.json';
+import { MAIN_PROFILE_MARKDOWN } from './generated/main-profile';
 
 export interface ProfileEntry {
   id: string;
@@ -18,15 +20,19 @@ export interface ProfileEntry {
 const BUILTIN: ProfileEntry = { id: 'default', label: 'AI Full Stack Engineer', builtin: true };
 const BUILTIN_PROFILE_FILE = '.claude/skills/job-application-assistant/01-candidate-profile.md';
 
+// The list of extra profiles is bundled at build time, so it never depends on
+// which files the hosting platform copies next to the server functions
 function registry(): ProfileEntry[] {
-  try {
-    const list = JSON.parse(readFile(path.join(ROOT, 'profiles', 'profiles.json')) || '[]');
-    return Array.isArray(list)
-      ? list.filter((p: ProfileEntry) => /^[a-z0-9-]{1,40}$/.test(p.id) && p.id !== BUILTIN.id).map((p: ProfileEntry) => ({ id: p.id, label: p.label, builtin: false }))
-      : [];
-  } catch {
-    return [];
-  }
+  const list: unknown = bundledRegistry;
+  return Array.isArray(list)
+    ? list
+        .filter((p: ProfileEntry) => /^[a-z0-9-]{1,40}$/.test(p.id) && p.id !== BUILTIN.id)
+        .map((p: ProfileEntry) => ({ id: p.id, label: p.label, builtin: false }))
+    : [];
+}
+
+export function registryCount(): number {
+  return registry().length;
 }
 
 // Unknown or missing ids fall back to the built-in profile
@@ -49,11 +55,11 @@ export async function getProfileMarkdown(p: ProfileEntry): Promise<string> {
     const stored = await kvGet(`profile:${p.id}`);
     if (stored !== null) return stored;
     // First run on Vercel: start from the file shipped with the repo, or a blank template
-    return (p.builtin ? readFile(profileFile(p)) : null) ?? template(p);
+    return p.builtin ? (readFile(profileFile(p)) ?? MAIN_PROFILE_MARKDOWN) : template(p);
   }
   const content = readFile(profileFile(p));
   if (content !== null) return content;
-  if (p.builtin) return '';
+  if (p.builtin) return MAIN_PROFILE_MARKDOWN;
   const blank = template(p);
   writeFile(profileFile(p), blank);
   return blank;

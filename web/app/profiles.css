@@ -96,6 +96,18 @@
 
 .pm-divider { height: 1px; margin: 6px 4px; background: var(--border); }
 
+.pm-error {
+  margin: 2px 4px 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--warn) 85%, var(--text));
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+
+.pm-error code { font-family: var(--mono); font-size: 11px; }
+
 /* Drawer additions */
 .drawer-edit {
   position: absolute;
