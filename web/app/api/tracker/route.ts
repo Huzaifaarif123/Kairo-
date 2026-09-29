@@ -15,7 +15,10 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const profile = resolveProfile(new URL(req.url).searchParams.get('profile'));
-    const payload = await req.json();
+    const payload = await req.json().catch(() => undefined);
+    if (!payload || typeof payload !== 'object') {
+      return Response.json({ error: 'Invalid request body' }, { status: 400 });
+    }
     let rows: Row[] = await getTracker(profile);
 
     if (Array.isArray(payload)) {

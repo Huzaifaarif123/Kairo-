@@ -5,7 +5,7 @@
 // profiles/<id>/, on Vercel in Redis.
 
 import path from 'node:path';
-import { ROOT, usingRedis, kvGet, kvSet, readFile, writeFile } from './store';
+import { ROOT, usingDatabase, getStoredProfile, saveStoredProfile, getStoredTracker, saveStoredTracker, readFile, writeFile } from './store';
 import { parseCSV, stringifyCSV, TRACKER_HEADERS, type Row } from './csv';
 import { parseProfile, analyseJob, yearsOfExperience } from './tailor.js';
 import bundledRegistry from '../../profiles/profiles.json';
@@ -51,23 +51,37 @@ function trackerFile(p: ProfileEntry): string {
 // ---------- Profile markdown ----------
 
 export async function getProfileMarkdown(p: ProfileEntry): Promise<string> {
-  if (usingRedis) {
-    const stored = await kvGet(`profile:${p.id}`);
+  if (usingDatabase) {
+    const stored = await getStoredProfile(p.id);
     if (stored !== null) return stored;
-    // First run on Vercel: start from the file shipped with the repo, or a blank template
+    // Nothing saved yet: start from the file shipped with the repo, or a blank template
     return p.builtin ? (readFile(profileFile(p)) ?? MAIN_PROFILE_MARKDOWN) : template(p);
   }
   const content = readFile(profileFile(p));
   if (content !== null) return content;
   if (p.builtin) return MAIN_PROFILE_MARKDOWN;
   const blank = template(p);
-  writeFile(profileFile(p), blank);
+  // Saving the blank template is a convenience; reading must work even on a read-only disk
+  try { writeFile(profileFile(p), blank); } catch { /* e.g. Vercel without a database */ }
   return blank;
 }
 
 export async function saveProfileMarkdown(p: ProfileEntry, markdown: string): Promise<void> {
-  if (usingRedis) await kvSet(`profile:${p.id}`, markdown);
-  else writeFile(profileFile(p), markdown);
+  if (usingDatabase) await saveStoredProfile(p.id, markdown);
+  else writeLocal(profileFile(p), markdown);
+}
+
+// Clear message when saving without a database on a read-only host (e.g. Vercel)
+function writeLocal(file: string, content: string): void {
+  try {
+    writeFile(file, content);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EROFS' || code === 'EACCES' || code === 'EPERM') {
+      throw new Error('Saving needs a database on this server. Connect Postgres (Neon) in Vercel → Storage.');
+    }
+    throw err;
+  }
 }
 
 // ---------- Trackers ----------
@@ -108,24 +122,24 @@ const STARTER_ROWS: Row[] = [
 ];
 
 export async function getTracker(p: ProfileEntry): Promise<Row[]> {
-  if (usingRedis) {
-    const stored = await kvGet(`tracker:${p.id}`);
-    if (stored !== null) return JSON.parse(stored);
+  if (usingDatabase) {
+    const stored = await getStoredTracker<Row>(p.id);
+    if (stored !== null) return stored;
     if (!p.builtin) return [];
-    await kvSet(`tracker:${p.id}`, JSON.stringify(STARTER_ROWS));
+    await saveStoredTracker(p.id, STARTER_ROWS);
     return STARTER_ROWS;
   }
   const content = readFile(trackerFile(p));
   if (content !== null) return parseCSV(content);
   if (!p.builtin) return [];
-  // Same first-run behaviour as the original dashboard
-  writeFile(trackerFile(p), stringifyCSV(TRACKER_HEADERS, STARTER_ROWS));
+  // Same first-run behaviour as the original dashboard (skipped on a read-only disk)
+  try { writeFile(trackerFile(p), stringifyCSV(TRACKER_HEADERS, STARTER_ROWS)); } catch { /* read-only */ }
   return STARTER_ROWS;
 }
 
 export async function saveTracker(p: ProfileEntry, rows: Row[]): Promise<void> {
-  if (usingRedis) await kvSet(`tracker:${p.id}`, JSON.stringify(rows));
-  else writeFile(trackerFile(p), stringifyCSV(TRACKER_HEADERS, rows));
+  if (usingDatabase) await saveStoredTracker(p.id, rows);
+  else writeLocal(trackerFile(p), stringifyCSV(TRACKER_HEADERS, rows));
 }
 
 // ---------- Summaries ----------
@@ -144,7 +158,14 @@ function isComplete(parsed: ReturnType<typeof parseProfile>): boolean {
 
 export async function listProfiles() {
   return Promise.all([BUILTIN, ...registry()].map(async p => {
-    const md = await getProfileMarkdown(p);
+    let md: string;
+    try {
+      md = await getProfileMarkdown(p);
+    } catch (err) {
+      // Keep the switcher usable if the database is briefly unreachable
+      console.error(`Could not load profile ${p.id}:`, (err as Error).message);
+      return { id: p.id, label: p.label, builtin: p.builtin, name: '', title: p.label, initials: initials(p.label), complete: false, error: 'Could not load from the database' };
+    }
     const parsed = parseProfile(md);
     const name = parsed.name || '';
     return {

@@ -7,6 +7,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const nextConfig = {
   // The app reads the framework's profile files from the repo root, one level up
   outputFileTracingRoot: path.join(here, '..'),
+  // Postgres driver runs as a normal Node package on the server
+  serverExternalPackages: ['pg'],
   outputFileTracingIncludes: {
     '/api/**': [
       '../.claude/skills/job-application-assistant/01-candidate-profile.md',

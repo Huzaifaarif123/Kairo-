@@ -1610,6 +1610,9 @@ textarea.textarea-sm { min-height: 88px; }
   color: var(--bg);
   font-size: 13px;
   font-weight: 500;
+  max-width: min(560px, calc(100vw - 32px));
+  text-align: center;
+  line-height: 1.45;
   box-shadow: var(--shadow-lg);
   transition: opacity 0.2s var(--ease), transform 0.2s var(--ease);
 }

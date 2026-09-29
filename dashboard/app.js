@@ -8,46 +8,8 @@ function apiUrl(path) {
   return `${path}?profile=${encodeURIComponent(activeProfile)}`;
 }
 
-let applications = [
-  {
-    date: '2026-09-01',
-    company: 'Deployly AI',
-    sector: 'AI & Developer Tools',
-    role: 'Senior Full Stack AI Engineer',
-    role_type: 'Full-time',
-    channel: 'LinkedIn',
-    status: 'drafted',
-    fit_rating: '94',
-    notes: 'High synergy with Claude Code, Python, and Next.js background',
-    cv_file: 'cv/main_DeploylyAI_AIEngineer.tex',
-    source: 'https://www.linkedin.com/jobs/view/ai-engineer-at-deployly-ai-4447791646'
-  },
-  {
-    date: '2026-08-28',
-    company: 'Nexus Cloud Systems',
-    sector: 'Cloud & Infrastructure',
-    role: 'Senior Backend Engineer',
-    role_type: 'Full-time',
-    channel: 'Freehire',
-    status: 'interview',
-    fit_rating: '91',
-    notes: 'Passed technical screen; System design scheduled next Tuesday',
-    cv_file: 'cv/main_Nexus_Backend.tex',
-    source: 'https://freehire.me/jobs/nexus-backend'
-  },
-  {
-    date: '2026-08-24',
-    company: 'FinVibe Technologies',
-    sector: 'FinTech',
-    role: 'Lead Python / Django Developer',
-    role_type: 'Full-time',
-    channel: 'Direct',
-    status: 'applied',
-    fit_rating: '88',
-    notes: 'Submitted tailored resume highlighting 38% API speedup and Celery async processing',
-    source: 'https://finvibe.io/careers'
-  }
-];
+// Filled from the server (/api/tracker) for the active profile
+let applications = [];
 
 // Last rendered search results, referenced by index from result cards
 let searchResults = [];
@@ -154,7 +116,7 @@ function parseProfileMarkdown(rawMd) {
   const listItems = (text) => text.split('\n').filter(l => l.startsWith('- ')).map(l => l.slice(2));
   const stripBold = (s) => s.replace(/\*\*/g, '');
 
-  const statusLine = (md.match(/\*\*Status:\*\*\s*(.+)/) || [])[1] || '';
+  const statusLine = ((md.match(/\*\*Status:\*\*[ \t]*(.*)/) || [])[1] || '').trim();
 
   return {
     status: statusLine,
@@ -260,7 +222,7 @@ function renderProfile(p) {
       </div>
     </section>` : ''}
 
-    ${p.complete === false ? `<div class="notice warn drawer-notice">${ICONS.warn}<span><strong>This profile is still empty.</strong> Click <strong>Edit profile</strong> above to add a name, experience and skills.</span></div>` : ''}
+    ${p.complete === false ? `<div class="notice warn drawer-notice">${ICONS.warn}<span><strong>This profile is still empty.</strong> <button class="btn-link inline-link" onclick="chooseCvFile()">Upload a CV</button> to fill it in automatically, or click <strong>Edit profile</strong> above.</span></div>` : ''}
     ${!p.name ? `<div class="notice warn">${ICONS.warn}<span>Couldn't load the full profile from the server.</span></div>` : ''}
   `;
 }
@@ -319,20 +281,25 @@ function switchTab(tabId) {
 
 // Load Application Tracker Data from API / LocalStorage
 async function loadTrackerData() {
+  let loadError = '';
   try {
     const res = await fetch(apiUrl('/api/tracker'));
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        applications = data;
-      }
+    const data = await res.json().catch(() => null);
+    if (res.ok && Array.isArray(data)) {
+      applications = data;
+      try { localStorage.setItem(`applications:${activeProfile}`, JSON.stringify(data)); } catch (e) {}
+    } else {
+      loadError = (data && data.error) || `server error ${res.status}`;
     }
   } catch (err) {
-    console.warn('Local server API offline, using local storage state', err);
-    try {
-      const cached = localStorage.getItem(`applications:${activeProfile}`);
-      if (cached) applications = JSON.parse(cached);
-    } catch (e) {}
+    loadError = 'the server is not reachable';
+  }
+  if (loadError) {
+    // Fall back to this browser's last copy of the real data, never to sample data
+    let cached = null;
+    try { cached = JSON.parse(localStorage.getItem(`applications:${activeProfile}`) || 'null'); } catch (e) {}
+    applications = Array.isArray(cached) ? cached : [];
+    showToast(`Couldn't load applications (${loadError})${cached ? '. Showing the last copy saved in this browser.' : '.'}`, 6000);
   }
   updateStats();
   renderKanban();
@@ -341,14 +308,22 @@ async function loadTrackerData() {
 
 async function syncTrackerData() {
   try { localStorage.setItem(`applications:${activeProfile}`, JSON.stringify(applications)); } catch (e) {}
+  let saveError = '';
   try {
-    await fetch(apiUrl('/api/tracker'), {
+    const res = await fetch(apiUrl('/api/tracker'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(applications)
     });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      saveError = (data && data.error) || `server error ${res.status}`;
+    }
   } catch (err) {
-    console.warn('Could not sync with CSV server', err);
+    saveError = 'the server is not reachable';
+  }
+  if (saveError) {
+    showToast(`Couldn't save your change (${saveError}). It's kept in this browser for now.`, 6000);
   }
   updateStats();
   renderCharts();
@@ -959,12 +934,12 @@ function statusPill(status) {
 }
 
 let toastTimer;
-function showToast(message) {
+function showToast(message, duration = 2200) {
   const toast = document.getElementById('toast');
   toast.textContent = message;
   toast.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
+  toastTimer = setTimeout(() => toast.classList.remove('show'), duration);
 }
 
 function copyText(elemId) {

@@ -21,14 +21,17 @@ Claude Code commands: `job_search_tracker.csv`, the candidate profile in
 2. **Root Directory:** `web`. Framework preset: Next.js (detected). Keep "Include files
    outside the root directory in the Build Step" enabled (the default); the app reads
    the candidate profile from the repo root.
-3. **Storage:** in the project's **Storage** tab, add **Upstash for Redis** and connect it.
-   This sets `KV_REST_API_URL` and `KV_REST_API_TOKEN` (`UPSTASH_REDIS_REST_URL` /
-   `UPSTASH_REDIS_REST_TOKEN` also work). Without it the site loads, but saving fails
-   because Vercel's filesystem is read-only.
+3. **Database (Postgres):** in the project's **Storage** tab, create a **Neon** (Postgres)
+   database and connect it to the project for all environments. This sets `DATABASE_URL`
+   (or `POSTGRES_URL`). The app creates its two tables (`kairo_profiles`,
+   `kairo_trackers`) automatically on first use. Without a database the site loads, but
+   saving fails because Vercel's filesystem is read-only. (Upstash Redis still works as
+   an alternative via `KV_REST_API_URL` / `KV_REST_API_TOKEN`; Postgres wins if both are set.)
 4. Deploy.
 
 On Vercel, the first read of each profile and tracker starts from the files in the repo;
-every save after that goes to Redis. "Save to cv/" only works locally; use
+every save after that goes to the database. Check `/api/health` on the live site: it
+should show `"storage":"postgres","database":"connected"`. "Save to cv/" only works locally; use
 "Download .tex" on Vercel.
 
 ## Notes

@@ -158,3 +158,34 @@ textarea.editor-area {
   textarea.editor-area { min-height: 55vh; min-height: 55dvh; font-size: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .editor-actions .btn { flex: 1; }
 }
+
+/* CV import */
+.editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.editor-head .editor-title { margin-bottom: 0; }
+
+.editor-upload { height: 32px; padding: 0 12px; font-size: 12.5px; flex-shrink: 0; }
+
+.editor-upload svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.import-notice { margin: 8px 0 12px; font-size: 12.5px; line-height: 1.55; }
+
+.inline-link { display: inline; min-height: 0; min-width: 0; padding: 0; color: var(--accent); font-size: inherit; text-decoration: underline; }
+
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
+  .editor-upload { height: 40px; }
+}

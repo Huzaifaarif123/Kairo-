@@ -1,6 +1,6 @@
 import { resolveProfile, getProfileMarkdown } from '@/lib/profiles';
 import { tailorCV, saveTailoredCV } from '@/lib/tailor.js';
-import { ROOT, usingRedis } from '@/lib/store';
+import { ROOT, usingDatabase } from '@/lib/store';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
       return Response.json({ error: `The ${profile.label} profile is still empty. Fill in its name and experience first.` }, { status: 422 });
     }
     if (save) {
-      if (usingRedis) {
+      if (usingDatabase) {
         return Response.json({ error: 'Saving to the cv/ folder only works when running locally. Use Download .tex instead.' }, { status: 501 });
       }
       (result as Record<string, unknown>).savedTo = saveTailoredCV(result, ROOT);

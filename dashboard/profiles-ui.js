@@ -101,6 +101,9 @@ function renderProfileMenu() {
     </button>
     <button class="pm-action" onclick="closeProfileMenu(); openProfileEditor()">
       <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>Edit profile
+    </button>
+    <button class="pm-action" onclick="chooseCvFile()">
+      <svg viewBox="0 0 24 24"><path d="M12 15V3M7 8l5-5 5 5M4 21h16"/></svg>Import from CV
     </button>`;
 }
 
@@ -153,20 +156,28 @@ function resetTailor() {
 
 // ---------- Editor ----------
 
-async function openProfileEditor() {
+// `draft` is profile markdown to review before saving (e.g. read from an uploaded CV)
+async function openProfileEditor(draft = null, noticeHtml = '') {
   await openProfile();
   const p = profileData || {};
   const current = currentProfile();
   document.getElementById('profile-body').innerHTML = `
     <div class="editor">
-      <h2 class="editor-title">Edit profile</h2>
+      <div class="editor-head">
+        <h2 class="editor-title">${draft ? 'Review imported profile' : 'Edit profile'}</h2>
+        <button class="btn btn-secondary editor-upload" onclick="chooseCvFile()">
+          <svg viewBox="0 0 24 24"><path d="M12 15V3M7 8l5-5 5 5M4 21h16"/></svg>
+          <span>Upload CV</span>
+        </button>
+      </div>
+      ${noticeHtml}
       <p class="muted editor-help">
         ${current && current.builtin
           ? 'This is the main profile that <code>/apply</code> and the other Claude Code commands also use.'
           : 'Fill in each section. Lines inside <code>&lt;!-- --&gt;</code> are examples and are ignored.'}
         Keep the headings and the <code>- **Label:**</code> format so the dashboard can read it.
       </p>
-      <textarea id="profile-editor" class="input editor-area" spellcheck="false">${escapeHtml(p.rawMarkdown || '')}</textarea>
+      <textarea id="profile-editor" class="input editor-area" spellcheck="false">${escapeHtml(draft ?? p.rawMarkdown ?? '')}</textarea>
       <div class="editor-actions">
         <button class="btn btn-secondary" onclick="cancelProfileEditor()">Cancel</button>
         <button class="btn btn-primary" id="profile-save" onclick="saveProfileEditor()">Save profile</button>
