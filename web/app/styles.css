@@ -201,6 +201,8 @@ button { cursor: pointer; }
   letter-spacing: -0.01em;
 }
 
+.mobile-brand { display: none; }
+
 .nav {
   display: flex;
   flex-direction: column;
@@ -1677,6 +1679,15 @@ textarea.textarea-sm { min-height: 88px; }
   .topbar { margin-bottom: 20px; }
 
   .page-title { font-size: 20px; }
+
+  .mobile-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .mobile-brand .brand-mark { width: 24px; height: 24px; border-radius: 7px; }
+  .mobile-brand .brand-name { font-size: 14px; }
 
   .topbar .btn-primary span { display: none; }
 
