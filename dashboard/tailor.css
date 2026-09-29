@@ -76,6 +76,8 @@
 
 .tailor-sub:first-of-type { margin-top: 0; }
 
+#tailor-gap-block { margin-top: 16px; }
+
 .req-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .req-chip {

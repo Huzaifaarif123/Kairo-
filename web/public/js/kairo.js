@@ -92,6 +92,7 @@ function initApp() {
   if (activeProfile !== 'default') applications = [];
   setupNavigation();
   setupTheme();
+  setupTypingState();
   loadTrackerData();
   renderDashboard();
   renderKanban();
@@ -266,6 +267,16 @@ function renderProfile(p) {
     ${p.complete === false ? `<div class="notice warn drawer-notice">${ICONS.warn}<span><strong>This profile is still empty.</strong> Click <strong>Edit profile</strong> above to add a name, experience and skills.</span></div>` : ''}
     ${!p.name ? `<div class="notice warn">${ICONS.warn}<span>Couldn't load the full profile from the server.</span></div>` : ''}
   `;
+}
+
+// On phones the fixed bottom bar would sit on top of the keyboard, so hide it
+// while a text field has focus (see body.typing in styles.css)
+function setupTypingState() {
+  const isField = el => el && el.matches && el.matches('input:not([type=checkbox]):not([type=radio]), textarea, select');
+  document.addEventListener('focusin', e => { if (isField(e.target)) document.body.classList.add('typing'); });
+  document.addEventListener('focusout', () => {
+    setTimeout(() => { if (!isField(document.activeElement)) document.body.classList.remove('typing'); }, 50);
+  });
 }
 
 // Theme Management
@@ -1004,6 +1015,15 @@ const CV_DOC_CSS = `
   mark { background: none; color: inherit; }
   body.highlight mark { background: #fff2b3; border-radius: 2px; box-shadow: 0 0 0 1px #fff2b3; }
   @media print { .page { padding: 0; } body.highlight mark { background: none; box-shadow: none; } }
+  body { overflow-wrap: anywhere; }
+  @media screen and (max-width: 600px) {
+    .page { padding: 22px 18px 28px; }
+    h1 { font-size: 20pt; }
+    .cv-headline { font-size: 11pt; }
+    .cv-job-head { flex-wrap: wrap; gap: 0 8px; }
+    .cv-job-head span { white-space: normal; }
+    ul { padding-left: 14px; }
+  }
 `;
 
 function cvDocument(html, title, highlight) {

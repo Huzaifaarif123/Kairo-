@@ -143,6 +143,6 @@ textarea.editor-area {
   .drawer-close { width: 40px; height: 40px; }
   .drawer-body { padding-bottom: calc(32px + env(safe-area-inset-bottom)); }
   .pm-item, .pm-action { min-height: 48px; }
-  textarea.editor-area { min-height: 55vh; min-height: 55dvh; font-size: 16px; }
+  textarea.editor-area { min-height: 55vh; min-height: 55dvh; font-size: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .editor-actions .btn { flex: 1; }
 }

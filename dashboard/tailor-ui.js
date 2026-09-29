@@ -33,6 +33,15 @@ const CV_DOC_CSS = `
   mark { background: none; color: inherit; }
   body.highlight mark { background: #fff2b3; border-radius: 2px; box-shadow: 0 0 0 1px #fff2b3; }
   @media print { .page { padding: 0; } body.highlight mark { background: none; box-shadow: none; } }
+  body { overflow-wrap: anywhere; }
+  @media screen and (max-width: 600px) {
+    .page { padding: 22px 18px 28px; }
+    h1 { font-size: 20pt; }
+    .cv-headline { font-size: 11pt; }
+    .cv-job-head { flex-wrap: wrap; gap: 0 8px; }
+    .cv-job-head span { white-space: normal; }
+    ul { padding-left: 14px; }
+  }
 `;
 
 function cvDocument(html, title, highlight) {

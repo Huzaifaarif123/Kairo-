@@ -88,6 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (activeProfile !== 'default') applications = [];
   setupNavigation();
   setupTheme();
+  setupTypingState();
   loadTrackerData();
   renderDashboard();
   renderKanban();
@@ -262,6 +263,16 @@ function renderProfile(p) {
     ${p.complete === false ? `<div class="notice warn drawer-notice">${ICONS.warn}<span><strong>This profile is still empty.</strong> Click <strong>Edit profile</strong> above to add a name, experience and skills.</span></div>` : ''}
     ${!p.name ? `<div class="notice warn">${ICONS.warn}<span>Couldn't load the full profile from the server.</span></div>` : ''}
   `;
+}
+
+// On phones the fixed bottom bar would sit on top of the keyboard, so hide it
+// while a text field has focus (see body.typing in styles.css)
+function setupTypingState() {
+  const isField = el => el && el.matches && el.matches('input:not([type=checkbox]):not([type=radio]), textarea, select');
+  document.addEventListener('focusin', e => { if (isField(e.target)) document.body.classList.add('typing'); });
+  document.addEventListener('focusout', () => {
+    setTimeout(() => { if (!isField(document.activeElement)) document.body.classList.remove('typing'); }, 50);
+  });
 }
 
 // Theme Management
