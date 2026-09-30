@@ -27,6 +27,8 @@ function cveWorkspace(opts) {
 
 const tailorWs = cveWorkspace({
   key: 'tailor',
+  // "Another CV" on the Tailor page stands in for the profile
+  oneOff: () => (typeof tailorOneOffMarkdown === 'function' ? tailorOneOffMarkdown() : ''),
   editorId: 'tailor-editor-body',
   barId: 'tailor-style-bar',
   job: () => ({
@@ -73,7 +75,7 @@ function cveRender(ws, delay = 500) {
       const res = await fetch(apiUrl('/api/cv/render'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cv: ws.cv, styles: ws.styles, template: ws.layout, job: ws.job() })
+        body: JSON.stringify({ cv: ws.cv, styles: ws.styles, template: ws.layout, job: ws.job(), profileMarkdown: ws.oneOff ? ws.oneOff() || undefined : undefined })
       });
       const data = await res.json();
       if (seq !== ws.seq) return;

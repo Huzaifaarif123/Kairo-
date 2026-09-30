@@ -8,6 +8,9 @@ export const dynamic = 'force-dynamic';
 // Claude's rewrite can take up to ~50 seconds
 export const maxDuration = 60;
 
+// A one-off CV sent from the page (as profile markdown)
+const MAX_CV_MARKDOWN = 200_000;
+
 // A short, user-facing reason when Claude's rewrite isn't available
 function aiErrorMessage(err: unknown): string {
   if (err instanceof Anthropic.AuthenticationError) return 'The Anthropic API key is not valid.';
@@ -22,7 +25,7 @@ function aiErrorMessage(err: unknown): string {
 export async function POST(req: Request) {
   try {
     const profile = resolveProfile(new URL(req.url).searchParams.get('profile'));
-    const { title = '', company = '', description = '', save = false, confirmedSkills = [], ai = true, latex, filename, template = '', styles = {} } = await req.json().catch(() => ({}));
+    const { title = '', company = '', description = '', save = false, confirmedSkills = [], ai = true, latex, filename, template = '', styles = {}, profileMarkdown } = await req.json().catch(() => ({}));
     // Layout and style choices from the toolbar ({ layoutId: styleOptions })
     const options = { template: String(template || ''), styles: styles && typeof styles === 'object' && !Array.isArray(styles) ? styles : {} };
 
@@ -40,7 +43,13 @@ export async function POST(req: Request) {
     if (!String(description).trim()) {
       return Response.json({ error: 'Paste a job description first.' }, { status: 400 });
     }
-    const profileMd = await getProfileMarkdown(profile);
+    // "Another CV": a CV uploaded or pasted on the Tailor page, used just for this request
+    // (never saved) instead of the selected profile
+    const oneOff = typeof profileMarkdown === 'string' && profileMarkdown.trim() ? profileMarkdown : null;
+    if (oneOff && oneOff.length > MAX_CV_MARKDOWN) {
+      return Response.json({ error: 'That CV is too long to tailor.' }, { status: 413 });
+    }
+    const profileMd = oneOff ?? await getProfileMarkdown(profile);
     if (!profileMd.trim()) {
       return Response.json({ error: 'Candidate profile not found. Run /setup first.' }, { status: 404 });
     }
@@ -49,7 +58,9 @@ export async function POST(req: Request) {
     const job = { title: String(title), company: String(company), description: String(description), confirmedSkills: confirmed };
     let result: Record<string, any> = tailorCV(job, profileMd, options);
     if (!result.cv.name || !result.cv.experience.length) {
-      return Response.json({ error: `The ${profile.label} profile is still empty. Fill in its name and experience first.` }, { status: 422 });
+      return Response.json({ error: oneOff
+        ? 'Could not find a name and work experience in that CV. Check the uploaded file or paste the CV text instead.'
+        : `The ${profile.label} profile is still empty. Fill in its name and experience first.` }, { status: 422 });
     }
 
     // Claude rewrites the selected content; if it can't, the rule-based CV is kept

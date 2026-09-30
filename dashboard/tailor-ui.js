@@ -6,6 +6,69 @@ PAGES.tailor = ['Tailor CV', 'Reshape your CV around a specific job description.
 
 let tailorResult = null;
 
+// Which CV is tailored: the selected profile, or "another CV" uploaded or pasted here
+// (read in the browser, sent with each request, never saved to a profile)
+let tailorSource = { kind: 'profile', name: '', markdown: '', label: '' };
+
+function tailorOneOffMarkdown() {
+  return tailorSource.kind === 'other' ? tailorSource.markdown : '';
+}
+
+function setTailorSource(kind) {
+  if (kind === tailorSource.kind) return;
+  if (tailorWs.edited && !confirm('Switching CVs clears the tailored CV and your edits. Continue?')) return;
+  tailorSource.kind = kind;
+  document.querySelectorAll('.cv-source .seg-btn').forEach(b => {
+    const on = b.dataset.src === kind;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', on);
+  });
+  document.getElementById('cv-source-other').hidden = kind !== 'other';
+  // A different CV: start the tailoring over
+  tailorConfirmed.clear();
+  tailorJobKey = '';
+  resetTailor();
+}
+
+async function handleTailorCvFile(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  if (file.size > CV_MAX_BYTES) return showToast('That file is larger than 10 MB');
+  showToast(`Reading ${file.name}…`, 60000);
+  try {
+    useTailorCv(await readCv(file), file.name);
+  } catch (err) {
+    console.warn('CV read failed', err);
+    showToast(friendlyCvError(err), 8000);
+  }
+}
+
+function useTailorCvText() {
+  const text = document.getElementById('tailor-cv-text').value;
+  if (text.replace(/\s/g, '').length < 80) return showToast('Paste the whole CV (it looks too short)');
+  try {
+    useTailorCv(parseCvText(text), 'pasted text');
+  } catch (err) {
+    showToast('Could not read that text as a CV');
+  }
+}
+
+function useTailorCv(cv, from) {
+  if (!cv.name || !cv.experience.length) {
+    showToast('Could not find a name and work experience in that CV. Try the other format (file or pasted text).', 7000);
+    return;
+  }
+  tailorSource = { kind: 'other', name: cv.name, markdown: buildProfileMarkdown(cv, null), label: from };
+  const skills = cv.skills.reduce((n, g) => n + g.items.length, 0);
+  document.getElementById('tailor-cv-status').innerHTML =
+    `Using <strong>${escapeHtml(cv.name)}</strong>'s CV (from ${escapeHtml(from)}): ${cv.experience.length} role${cv.experience.length === 1 ? '' : 's'}, ${skills} skills${cv.projects.length ? `, ${cv.projects.length} projects` : ''}. Not saved to any profile.`;
+  tailorConfirmed.clear();
+  tailorJobKey = '';
+  resetTailor();
+  showToast(`${cv.name}'s CV is ready. Add the job and click Tailor my CV.`, 4000);
+}
+
 // Skills the candidate confirmed for the current job (gaps their profile doesn't mention)
 const tailorConfirmed = new Set();
 let tailorJobKey = '';
@@ -107,6 +170,10 @@ async function runTailor({ ai = true } = {}) {
     document.getElementById('tailor-desc').focus();
     return;
   }
+  if (tailorSource.kind === 'other' && !tailorSource.markdown) {
+    showToast('Upload or paste the CV to tailor first');
+    return;
+  }
   // Tailoring again rebuilds the CV from the profile
   if (tailorWs.edited && !confirm('Tailoring again replaces the edits you made in Edit CV. Continue?')) return;
 
@@ -116,7 +183,7 @@ async function runTailor({ ai = true } = {}) {
     const res = await fetch(apiUrl('/api/tailor'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, company, description, confirmedSkills: [...tailorConfirmed], ai, template: tailorLayout, styles: tailorWs.styles })
+      body: JSON.stringify({ title, company, description, confirmedSkills: [...tailorConfirmed], ai, template: tailorLayout, styles: tailorWs.styles, profileMarkdown: tailorOneOffMarkdown() || undefined })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Tailoring failed');

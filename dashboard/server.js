@@ -260,7 +260,8 @@ const server = http.createServer(async (req, res) => {
           confirmedSkills: Array.isArray(job.confirmedSkills) ? job.confirmedSkills.map(String).slice(0, 60) : []
         };
         const options = { template: String(data.template || ''), styles: data.styles && typeof data.styles === 'object' ? data.styles : {} };
-        const rendered = renderTailoredCV(data.cv, jobInput, jobInput.description ? readProfileMarkdown(profile) : '', options);
+        const oneOff = typeof data.profileMarkdown === 'string' && data.profileMarkdown.trim() ? data.profileMarkdown.slice(0, 200000) : '';
+        const rendered = renderTailoredCV(data.cv, jobInput, jobInput.description ? (oneOff || readProfileMarkdown(profile)) : '', options);
         if (pathname === '/api/cv/render') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(rendered));
@@ -287,7 +288,7 @@ const server = http.createServer(async (req, res) => {
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => {
       try {
-        const { title = '', company = '', description = '', save = false, confirmedSkills = [], latex, filename, template = '', styles = {} } = JSON.parse(body || '{}');
+        const { title = '', company = '', description = '', save = false, confirmedSkills = [], latex, filename, template = '', styles = {}, profileMarkdown } = JSON.parse(body || '{}');
         // "Save to cv/": the exact CV on screen
         if (save && typeof latex === 'string' && typeof filename === 'string') {
           if (!/^main_[A-Za-z0-9_]+\.tex$/.test(filename) || !latex.trim() || latex.length > 300000) {
@@ -304,7 +305,9 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: 'Paste a job description first.' }));
           return;
         }
-        const profileMd = readProfileMarkdown(profile);
+        // "Another CV" from the Tailor page, used for this request only (never saved)
+        const oneOff = typeof profileMarkdown === 'string' && profileMarkdown.trim() ? profileMarkdown.slice(0, 200000) : '';
+        const profileMd = oneOff || readProfileMarkdown(profile);
         if (!profileMd.trim()) {
           res.writeHead(404, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Candidate profile not found. Run /setup first.' }));

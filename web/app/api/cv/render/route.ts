@@ -25,7 +25,9 @@ export async function POST(req: Request) {
       description: String(job.description || '').slice(0, 30_000),
       confirmedSkills: confirmed
     };
-    const profileMd = jobInput.description ? await getProfileMarkdown(resolveProfile(new URL(req.url).searchParams.get('profile'))) : '';
+    // A one-off CV ("Another CV" on the Tailor page) stands in for the profile
+    const oneOff = typeof body.profileMarkdown === 'string' && body.profileMarkdown.trim() ? body.profileMarkdown.slice(0, 200_000) : '';
+    const profileMd = !jobInput.description ? '' : oneOff || await getProfileMarkdown(resolveProfile(new URL(req.url).searchParams.get('profile')));
     const styles = body.styles && typeof body.styles === 'object' ? body.styles : {};
     const result = renderTailoredCV(body.cv, jobInput, profileMd, { template: String(body.template || ''), styles: styles as Record<string, object> });
     return Response.json(result);

@@ -326,6 +326,26 @@ Requirements:
                 <h2 class="card-title">Job details</h2>
                 <button class="btn-link" onclick="importFromEvaluator()">Import from Evaluate</button>
               </div>
+              <div class="cv-source">
+                <span class="cv-source-label">CV to tailor</span>
+                <div class="seg" role="radiogroup" aria-label="CV to tailor">
+                  <button type="button" class="seg-btn on" role="radio" aria-checked="true" data-src="profile" onclick="setTailorSource('profile')">My profile</button>
+                  <button type="button" class="seg-btn" role="radio" aria-checked="false" data-src="other" onclick="setTailorSource('other')">Another CV</button>
+                </div>
+                <div class="cv-source-other" id="cv-source-other" hidden>
+                  <input type="file" id="tailor-cv-file" accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" hidden onchange="handleTailorCvFile(this)">
+                  <button type="button" class="btn btn-secondary btn-block" onclick="document.getElementById('tailor-cv-file').click()">
+                    <svg viewBox="0 0 24 24"><path d="M12 15V3M7 8l5-5 5 5M4 21h16"/></svg>
+                    <span>Upload a CV (PDF, Word or text)</span>
+                  </button>
+                  <details class="cv-paste">
+                    <summary>or paste the CV text</summary>
+                    <textarea id="tailor-cv-text" class="input" rows="6" placeholder="Paste the whole CV here…"></textarea>
+                    <button type="button" class="btn btn-secondary" onclick="useTailorCvText()">Use this text</button>
+                  </details>
+                  <p class="cv-source-status" id="tailor-cv-status">No CV loaded yet. It is used only for tailoring and is not saved to any profile.</p>
+                </div>
+              </div>
               <div class="form-row">
                 <div class="field">
                   <label for="tailor-title">Job title</label>
