@@ -222,10 +222,57 @@ function renderTailorScore() {
         : '.'}</span>`;
 }
 
+// The recruiter review: a recruiter's first read (score, missing keywords, red flags),
+// the XYZ check of every bullet and the ATS / hiring-manager skim. Also called after
+// each edit in Edit CV.
+function renderTailorReview() {
+  const card = document.getElementById('tailor-review');
+  const rv = tailorResult && tailorResult.review;
+  card.hidden = !rv;
+  if (!rv) return;
+  const band = (n, good, fair) => (n >= good ? 'good' : n >= fair ? 'fair' : 'low');
+  const setBadge = (id, text, kind) => {
+    const el = document.getElementById(id);
+    el.textContent = text;
+    el.className = `review-badge ${kind}`;
+  };
+
+  const { recruiter, xyz, skim } = rv;
+  setBadge('review-score', `${recruiter.score}/100`, band(recruiter.score, 80, 60));
+  document.getElementById('review-recruiter').innerHTML = `
+    <ul class="review-parts">${recruiter.parts.map(p => `<li><span>${escapeHtml(p.label)} <small>(${escapeHtml(p.note)})</small></span><strong>${p.of ? `${p.points}/${p.of}` : p.points}</strong></li>`).join('')}</ul>
+    <h3 class="review-sub">Most important missing keywords</h3>
+    ${recruiter.missingKeywords.length
+      ? `<div class="req-chips">${recruiter.missingKeywords.map(k => `<span class="req-chip gap">${escapeHtml(k.name)}${k.required ? '' : '<small>nice to have</small>'}</span>`).join('')}</div>`
+      : '<p class="review-ok">None: the CV covers every keyword this posting names.</p>'}
+    <h3 class="review-sub">Biggest red flags in the first 10 seconds</h3>
+    ${recruiter.redFlags.length
+      ? `<ul class="review-flags">${recruiter.redFlags.map(f => `<li><strong>${escapeHtml(f.title)}.</strong> ${escapeHtml(f.detail)}<span class="review-fix">${escapeHtml(f.fix)}</span></li>`).join('')}</ul>${recruiter.moreFlags ? `<p class="review-ok">${recruiter.moreFlags} smaller issue${recruiter.moreFlags > 1 ? 's' : ''} not shown.</p>` : ''}`
+      : '<p class="review-ok">No red flags a recruiter would spot in 10 seconds.</p>'}`;
+
+  setBadge('review-xyz-badge', `${xyz.full}/${xyz.total} full XYZ`, band(xyz.total ? xyz.full / xyz.total : 0, 0.7, 0.4));
+  const tags = (list) => `<span class="review-tags">${list.map(x => `<span>no ${escapeHtml(x)}</span>`).join('')}</span>`;
+  document.getElementById('review-xyz').innerHTML = `
+    <p class="review-ok">Accomplished <strong>X</strong>, as measured by <strong>Y</strong>, by doing <strong>Z</strong>. ${xyz.quantified} of ${xyz.total} bullets have a measured result.</p>
+    ${xyz.rewrites.length ? `<h3 class="review-sub">Rewritten for you</h3><ul class="review-list">${xyz.rewrites.map(w => `<li><span class="review-before">${escapeHtml(w.before)}</span><span class="review-after">${escapeHtml(w.after)}</span></li>`).join('')}</ul>` : ''}
+    ${xyz.needNumbers.length
+      ? `<h3 class="review-sub">Add a number to these</h3><ul class="review-list">${xyz.needNumbers.map(b => `<li><strong>${escapeHtml(b.where)}</strong>${tags(b.missing)}<br>${escapeHtml(b.text)}</li>`).join('')}</ul>
+         <p class="review-ok">Only add numbers you can back up: % faster or cheaper, time saved, users or requests served, revenue, team size. Edit them in <strong>Edit CV</strong>.</p>`
+      : '<p class="review-ok">Every bullet has a measured result.</p>'}`;
+
+  const counts = skim.sections.reduce((c, s) => ({ ...c, [s.verdict]: (c[s.verdict] || 0) + 1 }), {});
+  const worst = counts.reject ? 'low' : counts.skip ? 'fair' : 'good';
+  setBadge('review-skim-badge', counts.reject ? `${counts.reject} reject` : `${counts.read || 0} read · ${counts.skim || 0} skim${counts.skip ? ` · ${counts.skip} skip` : ''}`, worst);
+  document.getElementById('review-skim').innerHTML = `
+    <p class="review-ok">About ${skim.pages} page${skim.pages > 1 ? 's' : ''}. What a reviewer with 200 CVs reads, skims, skips or rejects:</p>
+    <ul class="review-list review-skim">${skim.sections.map(s => `<li><span class="verdict ${s.verdict}">${escapeHtml(s.verdict)}</span><span><strong>${escapeHtml(s.section)}</strong>: ${escapeHtml(s.reason)}${s.fix ? `<span class="review-fix">${escapeHtml(s.fix)}</span>` : ''}</span></li>`).join('')}</ul>`;
+}
+
 function renderTailorResult() {
   const r = tailorResult;
   const { analysis } = r;
   renderTailorScore();
+  renderTailorReview();
 
   // Why a skill counts (or doesn't count) toward the score
   const tag = (m) => m.implied ? `via ${m.implied}`

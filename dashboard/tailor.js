@@ -146,7 +146,8 @@ export const stripComments = (md) => String(md || '').replace(/<!--[\s\S]*?-->/g
 const NOT_GIVEN = /^(available (up)?on request|upon request|n\/?a|none|-)$/i;
 
 export function parseProfile(rawMd) {
-  const md = stripComments(rawMd);
+  // PDF bullet glyphs can arrive as invisible control characters (e.g. U+0088)
+  const md = stripComments(String(rawMd || '').replace(/[\u0080-\u009F\u200B\uFEFF]/g, ''));
   const field = (label) => {
     const v = (md.match(new RegExp(`\\*\\*${label}:\\*\\*[ \\t]*(.*)`)) || [])[1]?.trim() || '';
     return NOT_GIVEN.test(v) ? '' : v;
@@ -809,6 +810,17 @@ export function tailorCV({ title = '', company = '', description = '', confirmed
     changes.push(`Kept ${projects.length} project${projects.length > 1 ? 's' : ''}${lead ? `, the ${lead} most relevant to this job first` : ''}`);
   }
 
+  // Recruiter polish: weak openers ("Responsible for building…") become action verbs and
+  // filler words go. Only the wording changes, never the facts or numbers.
+  const rewrites = [];
+  for (const job of experience) {
+    for (const b of job.bullets) {
+      const better = polishBullet(b.text);
+      if (better !== b.text) { rewrites.push({ before: b.text, after: better }); b.text = better; }
+    }
+  }
+  if (rewrites.length) changes.push(`Rewrote ${rewrites.length} bullet${rewrites.length > 1 ? 's' : ''} to open with an action verb and drop filler words`);
+
   const requiredTotal = matched.filter(t => t.required).length + missing.filter(t => t.required).length;
   const requiredMatched = matched.filter(t => t.required).length;
   const matchScore = requiredTotal ? Math.round((requiredMatched / requiredTotal) * 100) : (matched.length ? 100 : 0);
@@ -837,6 +849,7 @@ export function tailorCV({ title = '', company = '', description = '', confirmed
   return {
     job: { title, company },
     coverage: cvCoverage(cv, matched),
+    review: reviewCV(cv, { title, description }, profile, matched, missing, rewrites, visibleSections(layoutId, styles)),
     template: layoutId,
     analysis: {
       matchScore,
@@ -862,7 +875,7 @@ function renderLayouts(cv, terms, title, company, styles = {}) {
 
 // ----- Editing a CV (Edit CV panel and the CV Editor) -----
 
-const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
+const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B\uFEFF]/g;
 const str = (v, max = 300) => String(v ?? '').replace(CONTROL_CHARS, '').replace(/\s+/g, ' ').trim().slice(0, max);
 const text = (v, max = 2000) => String(v ?? '').replace(CONTROL_CHARS, '').trim().slice(0, max);
 const list = (v, max) => (Array.isArray(v) ? v.slice(0, max) : []);
@@ -945,7 +958,8 @@ export function profileToCV(profileMd) {
 export function renderTailoredCV(cv, { title = '', company = '', description = '', confirmedSkills = [] } = {}, profileMd = '', { template = DEFAULT_TEMPLATE, styles = {} } = {}) {
   const clean = normalizeCV(cv);
   const hasJob = Boolean(String(description).trim() || String(title).trim());
-  const matched = hasJob ? analyseJob(description, title, profileMd, confirmedSkills).matched : [];
+  const found = hasJob ? analyseJob(description, title, profileMd, confirmedSkills) : { matched: [], missing: [] };
+  const { matched } = found;
   const isMatch = (item) => matched.some(t => countMatches(t.re, item) > 0);
   const out = { ...clean, skills: clean.skills.map(g => ({ group: g.group, items: g.items.map(i => ({ name: i.name, matched: isMatch(i.name) })) })) };
   const layoutId = CV_TEMPLATES[template] ? template : DEFAULT_TEMPLATE;
@@ -953,6 +967,7 @@ export function renderTailoredCV(cv, { title = '', company = '', description = '
   return {
     cv: out,
     coverage: hasJob ? cvCoverage(out, matched) : null,
+    review: hasJob ? reviewCV(out, { title, description }, parseProfile(profileMd), matched, found.missing, [], visibleSections(layoutId, styles)) : null,
     template: layoutId,
     html: layout.html,
     css: layout.css,
@@ -997,6 +1012,338 @@ function cvCoverage(cv, matched) {
 function joinList(list) {
   if (list.length <= 1) return list.join('');
   return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+}
+
+// ---------- Recruiter review ----------
+// Three checks run on every tailored CV:
+//   1. a senior recruiter's first read: a match score out of 100, the five most important
+//      missing keywords and the three biggest red flags visible in the first 10 seconds
+//   2. every experience bullet against Google's XYZ formula (accomplished X, as measured
+//      by Y, by doing Z)
+//   3. an ATS and a hiring manager skimming 200 CVs: which sections get read, skimmed,
+//      skipped or rejected, and what makes each one stronger
+
+// "Responsible for building…" -> "Built…"
+const GERUND_PAST = {
+  building: 'Built', leading: 'Led', running: 'Ran', writing: 'Wrote', managing: 'Managed', designing: 'Designed',
+  developing: 'Developed', creating: 'Created', maintaining: 'Maintained', implementing: 'Implemented', delivering: 'Delivered',
+  owning: 'Owned', overseeing: 'Oversaw', coordinating: 'Coordinated', handling: 'Handled', supporting: 'Supported',
+  testing: 'Tested', deploying: 'Deployed', migrating: 'Migrated', integrating: 'Integrated', automating: 'Automated',
+  optimizing: 'Optimized', optimising: 'Optimised', monitoring: 'Monitored', mentoring: 'Mentored', training: 'Trained',
+  analyzing: 'Analyzed', analysing: 'Analysed', researching: 'Researched', planning: 'Planned', defining: 'Defined',
+  driving: 'Drove', launching: 'Launched', shipping: 'Shipped', scaling: 'Scaled', architecting: 'Architected',
+  establishing: 'Established', improving: 'Improved', reducing: 'Reduced', increasing: 'Increased', reviewing: 'Reviewed',
+  documenting: 'Documented', configuring: 'Configured', setting: 'Set', troubleshooting: 'Troubleshot', debugging: 'Debugged',
+  executing: 'Executed', producing: 'Produced', preparing: 'Prepared', conducting: 'Conducted', ensuring: 'Ensured',
+  providing: 'Provided', hiring: 'Hired', recruiting: 'Recruited', negotiating: 'Negotiated', growing: 'Grew',
+  modernizing: 'Modernized', modernising: 'Modernised', refactoring: 'Refactored', rebuilding: 'Rebuilt', engineering: 'Engineered',
+  administering: 'Administered', securing: 'Secured', evaluating: 'Evaluated', prototyping: 'Prototyped',
+  facilitating: 'Facilitated', streamlining: 'Streamlined', standardizing: 'Standardized', standardising: 'Standardised'
+};
+const PAST_VERBS = new Set([...Object.values(GERUND_PAST).map(v => v.toLowerCase()),
+  'took', 'made', 'cut', 'won', 'set', 'put', 'got', 'gave', 'kept', 'held', 'sold', 'taught', 'found', 'rewrote', 'undertook',
+  'stood', 'spun', 'split', 'shut', 'sped', 'bought', 'brought', 'began', 'became', 'chose', 'saw', 'drew', 'flew', 'fought',
+  'built', 'led', 'ran', 'wrote', 'drove', 'grew', 'oversaw', 'rebuilt', 'spent', 'sent', 'met', 'beat', 'overcame', 'hired']);
+// Bullet symbols and invisible characters a pasted or uploaded CV can start a line with
+const LEAD_SYMBOLS = /^[\p{Cc}\p{Cf}\p{Co}\p{So}•●▪■◦‣∙·*\-–—>\s]+/u;
+const PRESENT_VERBS = new Set(['cut', 'set', 'own', 'win', 'make', 'take', 'drive', 'grow', 'oversee', 'spearhead', 'architect', 'partner', 'advise', 'teach', 'coach']);
+// Openers that describe duties rather than results
+const WEAK_OPENERS = /^(?:(?:was|were)\s+)?(?:responsible for|tasked with|in charge of|worked (?:on|with|in)|helped|assisted|involved in|participated in|duties included|contributed to)\b/i;
+
+/** A bullet with a stronger opening and without filler. Facts and numbers are unchanged. */
+export function polishBullet(text) {
+  const original = String(text || '').replace(LEAD_SYMBOLS, '').trim();
+  let t = original;
+  if (!t) return t;
+  // No first person ("I built…" -> "Built…")
+  t = t.replace(/^(?:I|We)\s+(?=(?:was|were)\s|[a-z]+ed\b|led\b|built\b|ran\b|wrote\b|drove\b|grew\b|made\b|oversaw\b)/, '');
+  const owner = t.match(/^(?:(?:was|were)\s+)?(responsible for|tasked with|in charge of|worked on)\s+/i);
+  if (owner) {
+    const rest = t.slice(owner[0].length);
+    const g = rest.match(/^([a-z]+ing)\b\s*/i);
+    if (g && GERUND_PAST[g[1].toLowerCase()]) t = `${GERUND_PAST[g[1].toLowerCase()]} ${rest.slice(g[0].length)}`;
+    // "Responsible for a team of 5" -> "Led a team of 5"; "…for the platform" -> "Owned the platform"
+    else if (!g && /^(responsible for|in charge of)$/i.test(owner[1])) {
+      t = `${/^(?:a |the |an )?(?:\w+\s+){0,2}?(team|squad|group|engineers?|developers?|people|staff|reports|interns?)\b/i.test(rest) ? 'Led' : 'Owned'} ${rest}`;
+    }
+  }
+  t = t.replace(/\bsuccessfully\s+/gi, '')
+    .replace(/\bin order to\b/gi, 'to')
+    .replace(/\butili[sz]ing\b/gi, 'using')
+    .replace(/\butili[sz]ed\b/gi, 'used')
+    .replace(/\butili[sz]es\b/gi, 'uses')
+    .replace(/\butili[sz]e\b/gi, 'use')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  // Capitalise only a rewritten opening ("iOS", "pgvector" stay as written)
+  const firstWord = (x) => (x.match(/^\S+/) || [''])[0].toLowerCase();
+  if (t && firstWord(t) !== firstWord(original)) t = t[0].toUpperCase() + t.slice(1);
+  return t;
+}
+
+// Y: a measured result (years in dates don't count)
+const UNITS = 'k|m|mm|bn|million|billion|thousand|hours?|hrs?|minutes?|mins?|seconds?|secs?|ms|days?|weeks?|months?|years?|users?|customers?|clients?|requests?|rps|qps|tps|transactions?|engineers?|developers?|people|members|services|microservices|countries|markets|teams?|projects?|apps?|applications?|pipelines?|models?|tb|gb|pb|records|rows|documents|pages|tickets|releases|deployments|sites|stores|integrations|endpoints|apis|features|products|partners|accounts|leads|downloads|installs|students|patients|merchants|orders|events|messages|calls|servers|nodes|clusters|repositories|tests|queries|jobs|workflows|dashboards|reports|countries|languages';
+const MEASURE = new RegExp(String.raw`\d+(?:\.\d+)?\s*(?:%|x\b|\+)|[$£€₹]\s?\d|\b\d{1,3}(?:,\d{3})+\b|\b\d+(?:\.\d+)?\s*(?:${UNITS})\b|`
+  + String.raw`\b(?:doubled|tripled|quadrupled|halved)\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|hundreds?|thousands?|millions?|dozens?)\s+(?:of\s+)?(?:hours?|days?|weeks?|months?|minutes?|seconds?|years?|times|engineers?|developers?|teams?|people|clients?|customers?|users?|services|countries|markets|products|releases)\b|`
+  + String.raw`\b(?:team|group|squad|staff|cohort) of \d+\b|\b(?:top|over|under|within|than) \d+(?:\.\d+)?\b`, 'i');
+// A year ("in 2021") is not a result; "2000 users" is
+const YEAR_ONLY = new RegExp(String.raw`\b(?:19|20)\d{2}\b(?!\s*(?:\+|%|${UNITS})\b)`, 'gi');
+const hasMeasure = (text) => MEASURE.test(String(text).replace(YEAR_ONLY, ''));
+// Z: how it was done (a method word or a named technology)
+const hasMethod = (text) => /\b(by|using|with|through|via|leveraging|built on|powered by|on top of)\b/i.test(text)
+  || TERMS.some(t => t.category !== 'Ways of Working' && countMatches(t.re, text) > 0);
+// X: opens with an action verb ("Built", "Led", "Designs")
+function hasAction(rawText) {
+  const text = String(rawText || '').replace(LEAD_SYMBOLS, '');
+  if (WEAK_OPENERS.test(text)) return false;
+  // "Co-founded", "Re-architected": the verb is the last part
+  const w = ((String(text).trim().match(/^[A-Za-z-]+/) || [''])[0].toLowerCase().split('-').pop()) || '';
+  if (!w) return false;
+  if (PAST_VERBS.has(w) || (/[a-z]{3,}ed$/.test(w) && !/eed$/.test(w))) return true;
+  // present tense for a current role: "Build", "Builds", "Manages", "Runs", "Ships"
+  const base = w.endsWith('es') && GERUND_PAST[`${w.slice(0, -2)}ing`] ? w.slice(0, -2) : w.endsWith('s') ? w.slice(0, -1) : w;
+  return Boolean(GERUND_PAST[`${base}ing`] || GERUND_PAST[`${base.slice(0, -1)}ing`] || GERUND_PAST[`${base}${base.slice(-1)}ing`]
+    || PRESENT_VERBS.has(base));
+}
+
+const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+// "Jan 2020 – Present", "2019 - 2020", "03/2021 – 05/2022" -> months since year 0
+function parsePeriod(period, nowAt) {
+  const raw = String(period || '').trim();
+  if (!/(?:19|20)\d{2}|present|current|ongoing/i.test(raw)) return null;
+  let parts = raw.split(/\s*[–—]\s*|\s+-\s+|\s+to\s+|(?<=\d{4})-(?=\s*[A-Za-z0-9])/i).filter(Boolean);
+  // "Since 2021" runs to now; a single date ("2022") is one year
+  if (parts.length === 1) parts = /^(since|from)\b/i.test(raw) ? [raw.replace(/^(since|from)\s*/i, ''), 'present'] : [raw, raw];
+  const point = (s, isEnd) => {
+    if (/present|current|now|today|date|ongoing/i.test(s)) return { at: nowAt, exact: true, current: true };
+    const y = s.match(/(?:19|20)\d{2}/);
+    if (!y) return null;
+    const name = s.toLowerCase().match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/);
+    const num = s.match(/\b(\d{1,2})[/.](?:19|20)\d{2}/);
+    const month = name ? MONTHS[name[1]] : num && +num[1] >= 1 && +num[1] <= 12 ? +num[1] : 0;
+    return { at: +y[0] * 12 + ((month || (isEnd ? 12 : 1)) - 1), exact: Boolean(month) };
+  };
+  if (!parts.length) return null;
+  const start = point(parts[0], false);
+  const end = point(parts[parts.length - 1], true);
+  return start && end && end.at >= start.at ? { start, end } : null;
+}
+
+const monthName = (at) => `${Object.keys(MONTHS)[at % 12][0].toUpperCase()}${Object.keys(MONTHS)[at % 12].slice(1)} ${Math.floor(at / 12)}`;
+
+// The overall experience the posting requires: "5+ years of experience", "3-5 years'
+// professional experience", "Experience: 5+ years". Only required lines count (not
+// nice-to-haves), a range counts from its low end, and the company's own age
+// ("our team has 20 years of experience") is not a requirement.
+function requiredYears(description) {
+  const found = [];
+  for (const line of classifyLines(String(description || ''))) {
+    if (line.kind !== 'required' || /\b(we|we've|we have|our|us|company|firm|agency|has been|have been)\b/i.test(line.text)) continue;
+    const re = /(\d{1,2})\s*\+?\s*(?:(?:-|–|to)\s*\d{1,2}\s*)?\+?\s*years?['’]?\s*(?:of\s+)?(?:[\w/-]+\s+){0,4}?(?:experience|exp\b)|\bexperience\b[^.\d]{0,25}?(\d{1,2})\s*\+?\s*(?:(?:-|–|to)\s*\d{1,2}\s*)?\+?\s*years?/gi;
+    for (const m of line.text.matchAll(re)) {
+      const n = Number(m[1] || m[2]);
+      if (n > 0 && n <= 20) found.push(n);
+    }
+  }
+  return found.length ? Math.max(...found) : 0;
+}
+
+const TITLE_NOISE = new Set(['senior', 'sr', 'junior', 'jr', 'lead', 'principal', 'staff', 'head', 'chief', 'i', 'ii', 'iii', 'iv', 'remote', 'hybrid', 'contract', 'contractor', 'freelance', 'full-time', 'part-time', 'the', 'of', 'and', 'for', 'a', 'an', 'in', 'to', 'mid', 'level', 'associate', 'intern', 'independent', 'with', 'at']);
+const titleWords = (t) => String(t || '').toLowerCase()
+  .replace(/\bmachine[\s-]learning\b/g, 'ml').replace(/\bartificial intelligence\b/g, 'ai').replace(/\bsite reliability\b/g, 'sre').replace(/\bsre\b(?!\s+engineer)/g, 'sre engineer')
+  .replace(/\b(swe|sde)\b/g, 'software engineer').replace(/\bsoftware development engineer\b/g, 'software engineer')
+  .replace(/\bui\/ux|ux\/ui\b/g, 'ux').replace(/\bdev[\s-]?ops\b/g, 'devops').replace(/\bdata scientist\b/g, 'data science')
+  .replace(/\bfull[\s-]?stack\b/g, 'fullstack').replace(/\bfront[\s-]?end\b/g, 'frontend').replace(/\bback[\s-]?end\b/g, 'backend')
+  .replace(/\b(developer|programmer)s?\b/g, 'engineer').replace(/\bengineers\b/g, 'engineer')
+  .split(/[^a-z0-9+#.]+/).filter(w => w && !TITLE_NOISE.has(w));
+
+const cvWordCount = (cv) => words(renderText(cv));
+
+// The sections a layout shows with the chosen style (hidden ones removed)
+function visibleSections(layoutId, styles) {
+  const t = CV_TEMPLATES[layoutId] || CV_TEMPLATES[DEFAULT_TEMPLATE];
+  return resolveStyle(styles && styles[t.id], t.defaultStyle).sections;
+}
+
+/**
+ * The recruiter review of a finished CV for one posting.
+ * @param {any} cv the CV as shown (bullets as strings)
+ * @param {{ title?: string, description?: string }} job
+ * @param {any} profile the parsed profile the CV was built from
+ * @param {any[]} matched posting requirements the candidate covers (from analyseJob)
+ * @param {any[]} missing posting requirements the candidate doesn't cover
+ * @param {{ before: string, after: string }[]} [rewrites] wording fixes already applied
+ * @param {string[] | null} [visible] the sections the chosen layout shows (null: all)
+ */
+export function reviewCV(cv, { title = '', description = '' } = {}, profile, matched, missing, rewrites = [], visible = null) {
+  // What a reader actually sees: sections hidden in the style bar are left out
+  const shows = (id) => !visible || visible.includes(id);
+  const hidden = [];
+  cv = { ...cv };
+  for (const [id, key, empty] of [['summary', 'summary', ''], ['skills', 'skills', []], ['experience', 'experience', []], ['projects', 'projects', []], ['education', 'education', []], ['certifications', 'certifications', []]]) {
+    if (!shows(id)) { if ((cv[key] || '').length) hidden.push(id); cv[key] = empty; }
+  }
+  const nowDate = new Date();
+  const nowAt = nowDate.getFullYear() * 12 + nowDate.getMonth();
+  const required = matched.filter(t => t.required && !t.soft);
+  const requiredMissing = missing.filter(t => t.required && !t.soft);
+  const names = (list) => list.map(t => t.name);
+  const named = (text, list) => list.filter(t => countMatches(t.re, text) > 0);
+
+  // ---- 2. XYZ check of every bullet ----
+  const bullets = cv.experience.flatMap((x, role) => x.bullets.map(text => ({
+    role, where: [x.role, x.company].filter(Boolean).join(' at '), text,
+    x: hasAction(text), y: hasMeasure(text), z: hasMethod(text), words: words(text)
+  })));
+  const quantified = bullets.filter(b => b.y).length;
+  const xyzFull = bullets.filter(b => b.x && b.y && b.z).length;
+  const weak = bullets.filter(b => !b.x);
+  const long = bullets.filter(b => b.words > 35);
+
+  // ---- 1. Recruiter read ----
+  const reqTotal = required.length + requiredMissing.length;
+  const skillsFit = reqTotal ? required.length / reqTotal : 1;
+  const needYears = requiredYears(description);
+  const years = yearsOfExperience((profile.experience || []).map(x => ({ ...x, period: String(x.period || '') })));
+  const yearsFit = needYears ? Math.min(1, years / needYears) : 1;
+  const wanted = titleWords(cleanJobTitle(title));
+  const held = new Set([profile.title, ...(profile.experience || []).map(x => x.role)].flatMap(titleWords));
+  const titleFit = wanted.length ? wanted.filter(w => held.has(w)).length / wanted.length : 1;
+  const evidenceFit = bullets.length ? Math.min(1, quantified / bullets.length / 0.6) : 0;
+  const parts = [
+    { label: 'Required skills', points: Math.round(55 * skillsFit), of: 55, note: reqTotal ? `${required.length} of ${reqTotal} met` : 'none specified' },
+    { label: 'Experience level', points: Math.round(15 * yearsFit), of: 15, note: needYears ? `${years} of ${needYears}+ years asked` : `${years} years (no minimum stated)` },
+    { label: 'Title alignment', points: Math.round(10 * titleFit), of: 10, note: titleFit >= 1 ? 'you have held this kind of role' : titleFit > 0 ? 'partly matches your past titles' : 'differs from your past titles' },
+    { label: 'Measured results', points: Math.round(20 * evidenceFit), of: 20, note: `${quantified} of ${bullets.length} bullets have numbers` }
+  ];
+  const score = parts.reduce((n, p) => n + p.points, 0);
+
+  // Most important first: required hard skills, then nice-to-haves, then soft skills
+  const keywordOrder = [...requiredMissing, ...missing.filter(t => !t.required && !t.soft), ...missing.filter(t => t.soft)];
+  const missingKeywords = keywordOrder.slice(0, 5).map(t => ({ name: t.name, required: Boolean(t.required) }));
+
+  const flags = [];
+  const flag = (severity, title, detail, fix) => flags.push({ severity, title, detail, fix });
+  if (!cv.email || !cv.phone) flag(cv.email ? 70 : 95, 'Missing contact details', `No ${[!cv.email && 'email', !cv.phone && 'phone number'].filter(Boolean).join(' or ')} in the header.`, `Add ${!cv.email && !cv.phone ? 'them' : 'it'} to the header, or the recruiter has no way to reach you.`);
+  if (requiredMissing.length) flag(requiredMissing.length >= 3 ? 90 : 72, `Missing ${requiredMissing.length} required skill${requiredMissing.length > 1 ? 's' : ''}`,
+    `The posting requires ${joinList(names(requiredMissing).slice(0, 5))}${requiredMissing.length > 5 ? ' and more' : ''}, and the CV doesn't show ${requiredMissing.length > 1 ? 'them' : 'it'}.`,
+    'If you have one, click + I have this so it is added. If not, lead with the closest related experience.');
+  if (needYears && years < needYears) flag(years < needYears * 0.7 ? 85 : 62, 'Less experience than asked', `The posting asks for ${needYears}+ years; the CV shows about ${years}.`, 'Put your most senior, most relevant work first and make its results measurable.');
+  if (wanted.length && titleFit === 0) flag(58, 'Job titles don\'t match the role', `None of your past titles look like "${cleanJobTitle(title)}".`, 'The headline now names this role. Make sure the first bullets of your latest role show this kind of work.');
+  if (bullets.length && quantified / bullets.length < 0.4) flag(66, 'Few measurable results', `Only ${quantified} of ${bullets.length} bullets have a number; duties read weaker than results.`, 'Add how much, how many or how fast to your top bullets (see the XYZ check below).');
+  // Gaps between roles and since the last one
+  // Only when every role's dates can be read (a role without dates could fill the gap).
+  // Time in education counts as covered.
+  const spans = cv.experience.map(x => ({ x, p: parsePeriod(x.period, nowAt) }));
+  const gaps = [];
+  if (spans.length && spans.every(s => s.p)) {
+    const covered = [...spans, ...cv.education.map(e => ({ p: parsePeriod(e.period, nowAt) })).filter(s => s.p)]
+      .sort((a, b) => a.p.start.at - b.p.start.at);
+    let reach = null;
+    for (const s of covered) {
+      if (reach && s.p.start.at - reach.at - 1 > 6) gaps.push(`${monthName(reach.at + 1)} to ${monthName(s.p.start.at - 1)}`);
+      if (!reach || s.p.end.at > reach.at) reach = s.p.end;
+    }
+    if (reach && !reach.current && nowAt - reach.at > 6) gaps.push(`since ${monthName(reach.at + 1)}`);
+  }
+  if (gaps.length) flag(55, 'Employment gap', `No role covers ${joinList(gaps)}.`, 'Add a line for that time (freelance work, study, a career break) so it isn\'t left to guesswork.');
+  // Internships, contracts and freelance work are short by design
+  const short = spans.filter(s => s.p && !s.p.end.current && s.p.start.exact && s.p.end.exact && s.p.end.at - s.p.start.at + 1 < 12
+    && !/\b(intern(ship)?|trainee|apprentice|contract(or)?|freelance|consultant|temporary|temp|part[- ]time|seasonal|summer)\b/i.test(`${s.x.role} ${s.x.company}`));
+  if (short.length >= 2) flag(45, 'Several short stints', `${short.length} roles lasted under a year.`, 'Mark contract or project roles as such (e.g. "Contract") so they don\'t read as job hopping.');
+  if (weak.length) flag(40, 'Duty-style bullets', `${weak.length} bullet${weak.length > 1 ? 's' : ''} open${weak.length > 1 ? '' : 's'} without an action verb, e.g. "${weak[0].text.split(/\s+/).slice(0, 6).join(' ')}…"`, 'Start each bullet with what you did: Built, Led, Cut, Launched…');
+  // Measured on the six layouts' PDFs: about 430 words fill a page
+  const pages = Math.max(1, Math.ceil(cvWordCount(cv) / 430));
+  if (pages > 2) flag(38, 'Too long', `About ${pages} pages; recruiters rarely read past page two.`, 'Trim older roles to 2–3 bullets and hide sections this job doesn\'t need.');
+  if (long.length) flag(32, 'Dense bullets', `${long.length} bullet${long.length > 1 ? 's are' : ' is'} over 35 words.`, 'Keep each bullet to one or two lines: result, number, method.');
+  if (!cv.linkedin) flag(30, 'No LinkedIn', 'Most recruiters check LinkedIn before a call.', 'Add your LinkedIn URL to the header.');
+  const DEGREE = /\b(bachelor'?s?|master'?s?|ph\.?\s?d|doctorate|associate'?s degree|(?:university|college|academic|undergraduate|graduate|4-year|four-year)\s+degree|degree\s+(?:in|from)|b\.s\.|m\.s\.|b\.?sc|m\.?sc|bs\/ms|bs or ms|bs in|ms in|b\.?tech|m\.?tech|mba)\b/i;
+  const degreeLine = classifyLines(String(description || '')).find(l => l.kind === 'required' && DEGREE.test(l.text));
+  const equivalentOk = degreeLine && /\b(or equivalent|equivalent (?:practical |professional |work )?experience|or relevant experience|or similar experience)\b/i.test(degreeLine.text);
+  // Degree level: 3 doctorate, 2 master's, 1 bachelor's
+  const levelOf = (t) => (/\b(ph\.?\s?d|doctor(ate)?)\b/i.test(t) ? 3
+    : /\b(master'?s?|m\.?sc|m\.s\.|ms in|mba|m\.?tech|m\.?phil|m\.?eng|m\.?a\.)\b/i.test(t) ? 2
+    : /\b(bachelor'?s?|b\.?sc|b\.s\.|bs in|b\.?e\.|b\.?tech|b\.?eng|b\.?a\.|bba|undergraduate)\b/i.test(t) ? 1 : 0);
+  // The lowest degree the posting accepts ("Bachelor's or Master's" -> Bachelor's)
+  const LEVEL_WORDS = [[1, /\b(bachelor'?s?|b\.?sc|b\.s\.|bs in|b\.?tech|undergraduate|4-year|four-year|university|college)\b/i], [2, /\b(master'?s?|m\.?sc|m\.s\.|ms in|mba|m\.?tech)\b/i], [3, /\b(ph\.?\s?d|doctorate)\b/i]];
+  const needLevel = degreeLine ? (LEVEL_WORDS.find(([, re]) => re.test(degreeLine.text)) || [0])[0] : 0;
+  const haveLevel = Math.max(0, ...cv.education.map(e => levelOf(`${e.degree} ${e.school}`)));
+  const levelName = ['', 'a Bachelor\'s', 'a Master\'s', 'a PhD'];
+  const degreeShort = cv.education.length && needLevel && haveLevel && haveLevel < needLevel;
+  if (degreeShort) flag(equivalentOk ? 35 : 60, 'Degree below the requirement', `The posting asks for ${levelName[needLevel]}; the CV shows ${levelName[haveLevel]}.`, equivalentOk ? 'The posting accepts equivalent experience; make that experience obvious in your first bullets.' : 'Apply only if the rest of the CV is a strong match, and mention any further study.');
+  flags.sort((a, b) => b.severity - a.severity);
+  const penalised = flags.filter(f => !/required skill|Less experience|titles don|measurable results/.test(f.title));
+  const penalty = Math.min(20, penalised.reduce((n, f) => n + (f.severity >= 50 ? 5 : 2), 0));
+  if (penalty) parts.push({ label: 'Red flags', points: -penalty, of: 0, note: penalised.map(f => f.title[0].toLowerCase() + f.title.slice(1)).join(', ') });
+  const finalScore = Math.max(0, score - penalty);
+
+  // ---- 3. The 10-second skim: ATS and hiring manager ----
+  const sections = [];
+  const verdict = (section, v, reason, fix = '') => sections.push({ section, verdict: v, reason, fix });
+  if (!cv.name || !cv.email) verdict('Header', 'reject', `The ATS can't read ${[!cv.name && 'a name', !cv.email && 'an email'].filter(Boolean).join(' or ')}.`, 'Add your name, email and phone as plain text at the top.');
+  else if (!cv.phone) verdict('Header', 'skim', 'No phone number; recruiters usually call first.', 'Add a phone number to the header.');
+  else verdict('Header', 'read', `Name, headline "${cv.headline || '-'}" and contact details are clear.`, cv.linkedin ? '' : 'Add your LinkedIn URL.');
+  const summaryWords = words(cv.summary || '');
+  const inSummary = named(cv.summary || '', required);
+  if (hidden.includes('summary')) verdict('Summary', 'skip', 'Hidden in this layout.', required.length ? 'Show it: a short summary naming this job\'s top skills is the first thing a skimmer reads.' : '');
+  else if (!summaryWords) verdict('Summary', 'skip', 'There is no summary, so the reader goes straight to experience.', 'Add 2–3 sentences: the role, years of experience and your top skills for this job.');
+  else if (summaryWords > 90) verdict('Summary', 'skim', `${summaryWords} words; a skimmer reads only the first line.`, 'Cut it to three sentences (under 70 words) with the job\'s top skills in the first one.');
+  else if (reqTotal >= 2 && inSummary.length < Math.min(2, Math.max(1, required.length))) verdict('Summary', 'skim', 'It doesn\'t name this job\'s key skills.', required.length
+    ? `Name ${joinList(names(required).slice(0, 3))} in the first sentence.`
+    : `You don't list the skills this job requires (${joinList(names(requiredMissing).slice(0, 3))}); lead with your closest related experience.`);
+  else verdict('Summary', 'read', `${summaryWords} words naming ${inSummary.length ? joinList(names(inSummary).slice(0, 4)) : 'your focus'}.`);
+  const cov = cvCoverage(cv, matched);
+  const skillCount = cv.skills.reduce((n, g) => n + g.items.length, 0);
+  if (hidden.includes('skills')) verdict('Skills', 'skim', 'Hidden in this layout; the ATS has to find every keyword in your bullets.', 'Show the Skills section so keyword matching doesn\'t depend on bullets alone.');
+  else if (cov.cvScore < 100) verdict('Skills', 'skim', `ATS keyword match ${cov.cvScore}%: ${joinList(cov.notShown)} ${cov.notShown.length > 1 ? 'are' : 'is'} missing from the CV.`, 'Add them in the posting\'s wording.');
+  else if (reqTotal && required.length / reqTotal < 0.5) verdict('Skills', required.length ? 'skim' : 'skip', `ATS matches only ${required.length} of the ${reqTotal} required keywords; ${joinList(names(requiredMissing).slice(0, 4))} ${requiredMissing.length > 1 ? 'are' : 'is'} missing.`, 'Add any of them you really have (+ I have this); otherwise this CV is a stretch for this job.');
+  else if (skillCount > 40) verdict('Skills', 'skim', `${skillCount} skills; the relevant ones get lost.`, 'Hide the skills this job doesn\'t ask for.');
+  else verdict('Skills', 'read', cov.cvNeeded ? `ATS finds all ${cov.cvNeeded} required skills you have, in the posting's wording.` : 'Grouped by category, relevant skills first.');
+  cv.experience.forEach((x, i) => {
+    const label = `Experience: ${[x.role, x.company].filter(Boolean).join(', ')}`;
+    const p = parsePeriod(x.period, nowAt);
+    const top = x.bullets.slice(0, 2);
+    const topRelevant = top.filter(b => named(b, matched).length).length;
+    const topMeasured = top.filter(hasMeasure).length;
+    if (!x.bullets.length) verdict(label, 'skip', 'No bullets, so nothing to read.', 'Add 2–3 results, or remove the role.');
+    else if (i >= 2 && p && nowAt - p.end.at > 120) verdict(label, 'skip', 'Over ten years ago; a skimmer won\'t read it.', 'Keep it to one or two lines.');
+    else if (i === 0 && topRelevant && topMeasured) verdict(label, 'read', 'Most recent role opens with relevant, measured results.');
+    else if (i === 0) verdict(label, 'skim', `The first two bullets ${!topRelevant ? 'don\'t name this job\'s skills' : 'have no numbers'}.`, !topRelevant ? 'Open with the achievement that best matches the posting.' : 'Add a number (%, time saved, users, revenue) to the first bullet.');
+    else if (topRelevant) verdict(label, 'skim', 'Read for dates, title and the first bullet.', topMeasured ? '' : 'Put a measured result in the first bullet.');
+    else verdict(label, 'skip', 'Nothing in the first bullets relates to this job.', 'Cut it to 2 bullets that relate to the posting.');
+  });
+  if (hidden.includes('experience')) verdict('Experience', 'reject', 'Hidden in this layout, so the CV shows no work history.', 'Show the Experience section.');
+  if (hidden.includes('projects')) verdict('Projects', 'skip', 'Hidden for this application.');
+  else if ((cv.projects || []).length) {
+    const rel = cv.projects.filter(pr => named(`${pr.name} ${pr.desc}`, matched).length);
+    if (rel.length) verdict('Projects', 'skim', `${rel.length} of ${cv.projects.length} relate to this job.`, rel.length < cv.projects.length ? 'Hide the unrelated ones for this application.' : '');
+    else verdict('Projects', 'skip', 'None of them use this job\'s skills.', 'Hide Projects for this job (section toggles in the style bar).');
+  }
+  if (degreeShort) {
+    const soft = equivalentOk;
+    verdict('Education', soft ? 'skim' : 'reject', `The posting asks for ${levelName[needLevel]}${soft ? ' or equivalent experience' : ''}; the CV shows ${levelName[haveLevel]}.`, soft ? 'Let your experience carry it: lead with results in this field.' : 'An ATS filter may drop the CV; apply anyway only if the rest is a strong match.');
+  } else if (!cv.education.length) {
+    if (hidden.includes('education') && !(degreeLine && !equivalentOk)) verdict('Education', 'skip', 'Hidden in this layout.');
+    else if (degreeLine && !equivalentOk) verdict('Education', 'reject', `The posting requires a degree and ${hidden.includes('education') ? 'Education is hidden in this layout' : 'the CV lists none'}; an ATS filter may drop the CV.`, 'Add your degree, or the closest training or certification you have.');
+    else if (degreeLine) verdict('Education', 'skim', 'The posting asks for a degree or equivalent experience; your experience has to carry it.', 'Add any degree, bootcamp or certification you have.');
+    else verdict('Education', 'skip', 'No education listed; this posting doesn\'t require it.');
+  }
+  else verdict('Education', 'skim', needLevel && haveLevel >= needLevel ? `${levelName[haveLevel][0].toUpperCase()}${levelName[haveLevel].slice(1)} meets the posting's degree requirement.` : 'Checked only for a degree and school.');
+  if (hidden.includes('certifications')) verdict('Certifications', 'skip', 'Hidden in this layout.');
+  else if (cv.certifications.length) verdict('Certifications', 'skim', `${cv.certifications.length} listed; read only if they match the stack.`);
+
+  return {
+    recruiter: { score: finalScore, parts, missingKeywords, redFlags: flags.slice(0, 3).map(({ severity, ...f }) => f), moreFlags: Math.max(0, flags.length - 3) },
+    xyz: {
+      total: bullets.length,
+      full: xyzFull,
+      quantified,
+      // Bullets without a number, most recent role first: the ones to improve
+      needNumbers: bullets.filter(b => !b.y).slice(0, 6).map(b => ({ where: b.where, text: b.text, missing: [!b.x && 'action', 'measure', !b.z && 'method'].filter(Boolean) })),
+      rewrites: rewrites.slice(0, 8)
+    },
+    skim: { pages, sections }
+  };
 }
 
 export function cvFilename(company, title) {

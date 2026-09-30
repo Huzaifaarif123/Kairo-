@@ -270,7 +270,7 @@ const PLACE_WORDS = /\b(remote|hybrid|on-?site|pakistan|uae|united arab emirates
 const EDU_WORDS = /\b(bachelor'?s?|master'?s?|b\.?\s?sc|m\.?\s?sc|bsc|msc|b\.?s\.?|m\.?s\.?|b\.?a\.?|m\.?a\.?|mba|ph\.?\s?d|doctorate|diploma|associate degree|b\.?\s?tech|m\.?\s?tech|b\.?\s?e\.?|beng|meng|bcs|bscs|mcs|a-?levels?|o-?levels?|intermediate|matric(ulation)?|hssc|ssc|high school|fsc|ics)\b/i;
 const SCHOOL_WORDS = /\b(universit(?:y|ies)|colleges?|institutes?|schools?|academ(?:y|ies)|polytechnic|nuces|fast|lums|nust|comsats|iit|mit)\b/i;
 
-const BULLET_RE = /^\s*(?:[\p{So}\p{Co}•●▪■◦‣∙·➢➤►▶✓✔]\s*|[*\-–—]\s+|\d+[.)]\s+)/u;
+const BULLET_RE = /^\s*(?:[\p{So}\p{Co}\p{Cc}•●▪■◦‣∙·➢➤►▶✓✔]\s*|[*\-–—]\s+|\d+[.)]\s+)/u;
 
 // Lines that read like an achievement rather than a job title / company
 const ACTION_START = /^(rebuilt|redesigned|reworked|revamped|grew|expanded|lowered|raised|boosted|accelerated|enabled|defined|drafted|facilitated|negotiated|presented|published|secured|simplified|standardi[sz]ed|transformed|unified|upgraded|validated|taught|rolled out|won|cut|built|led|leading|designed|developed|created|implemented|managed|wrote|written|cut|reduced|improved|increased|modell?ed|mentored|delivered|launched|owned|drove|introduced|migrated|automated|optimi[sz]ed|architected|maintained|collaborated|worked|responsible|supported|established|spearheaded|streamlined|engineered|analy[sz]ed|coordinated|conducted|achieved|integrated|deployed|shipped|scaled|partnered|researched|tested|trained|oversaw|handled|prepared|produced|planned|organi[sz]ed|contributed|assisted|helped|ran|set up|refactored)\b/i;

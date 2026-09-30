@@ -41,7 +41,13 @@ const tailorWs = cveWorkspace({
     if (!tailorResult) return;
     Object.assign(tailorResult, { cv: data.cv, layouts: data.layouts, text: data.text, html: data.html, css: data.css, latex: data.latex });
     if (data.coverage) tailorResult.coverage = data.coverage;
+    if (data.review) {
+      // Keep the list of wording fixes made when the CV was tailored
+      const rewrites = tailorResult.review && tailorResult.review.xyz ? tailorResult.review.xyz.rewrites : [];
+      tailorResult.review = { ...data.review, xyz: { ...data.review.xyz, rewrites } };
+    }
     if (typeof renderTailorScore === 'function') renderTailorScore();
+    if (typeof renderTailorReview === 'function') renderTailorReview();
     renderTailorPreview();
   }
 });

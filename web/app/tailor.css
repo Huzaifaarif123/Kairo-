@@ -465,3 +465,53 @@ button.req-chip:focus-visible { outline: 2px solid var(--accent, #4f46e5); outli
   .sb-right { margin-left: 0; }
   .sb-right .sb-menu { left: 0; right: auto; }
 }
+
+/* Recruiter review: recruiter read, XYZ bullets, ATS and hiring-manager skim */
+.review-note { margin: 2px 0 10px; }
+.review-block { border-top: 1px solid var(--border); }
+.review-block > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+.review-block > summary::-webkit-details-marker { display: none; }
+.review-block > summary::after { content: '+'; color: var(--text-3); font-weight: 400; margin-left: 4px; }
+.review-block[open] > summary::after { content: '−'; }
+.review-block > summary > span:first-child { flex: 1; }
+.review-block > div { padding-bottom: 12px; }
+.review-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.review-badge.good, .verdict.read { color: color-mix(in srgb, var(--ok) 85%, var(--text)); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.review-badge.fair, .verdict.skim { color: color-mix(in srgb, var(--warn) 85%, var(--text)); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.review-badge.low, .verdict.reject { color: color-mix(in srgb, var(--st-closed) 85%, var(--text)); background: color-mix(in srgb, var(--st-closed) 12%, transparent); }
+.verdict.skip { color: var(--text-2); background: var(--surface-3); }
+.review-parts { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 4px; font-size: 12.5px; }
+.review-parts li { display: flex; justify-content: space-between; gap: 10px; color: var(--text-2); }
+.review-parts li strong { color: var(--text); font-weight: 600; white-space: nowrap; }
+.review-sub { margin: 10px 0 6px; font-size: 12px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.review-flags, .review-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.review-flags li, .review-list li { font-size: 12.5px; line-height: 1.45; color: var(--text-2); overflow-wrap: anywhere; }
+.review-flags li strong, .review-list li strong { color: var(--text); }
+.review-fix { display: block; margin-top: 2px; color: var(--text); }
+.review-fix::before { content: 'Fix: '; font-weight: 600; color: var(--accent); }
+.review-before { display: block; text-decoration: line-through; color: var(--text-3); }
+.review-after { display: block; color: var(--text); }
+.review-tags { display: inline-flex; gap: 4px; margin-left: 4px; }
+.review-tags span { font-size: 10.5px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--warn) 12%, transparent); color: color-mix(in srgb, var(--warn) 85%, var(--text)); }
+.review-skim li { display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; align-items: start; }
+.verdict { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 999px; margin-top: 1px; }
+.review-ok { font-size: 12.5px; color: var(--text-2); margin: 0; }
+.review-list + .review-ok { margin-top: 8px; }
