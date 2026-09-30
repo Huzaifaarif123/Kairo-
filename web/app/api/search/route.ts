@@ -36,10 +36,7 @@ export async function POST(req: Request) {
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('The job board took too long to respond. Try again.')), TIMEOUT_MS));
     const found = (await Promise.race([search, timeout])) as { title?: string | null; company?: string | null; url?: string | null }[];
-    // Staffing-agency postings last
-    const results = vetBoardResults(tool, found, params.query)
-      .sort((a, b) => Number(Boolean((a as { staffing?: boolean }).staffing)) - Number(Boolean((b as { staffing?: boolean }).staffing)))
-      .map(r => ({ source: label, portal: tool, ...r }));
+    const results = vetBoardResults(tool, found, params.query).map(r => ({ source: label, portal: tool, ...r }));
 
     return Response.json({
       portal: tool,

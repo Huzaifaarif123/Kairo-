@@ -304,28 +304,31 @@ export async function searchLinkedIn(sp: SearchParams) {
 
   // Confirms which of a page's listings are remote, one posting at a time
   async function keepRemote(cards: LinkedInCard[]) {
-    const toOpen: LinkedInCard[] = [];
-    for (const c of cards) {
-      const head = `${c.title} ${c.location || ''}`;
+    for (const card of cards) {
+      if (results.length >= limit) break;
+      const head = `${card.title} ${card.location || ''}`;
       if (/\bhybrid\b|\bon-?site\b/i.test(head)) continue;
-      // Listed as remote: no need to open the posting
-      if (/\bremote\b/i.test(head)) results.push({ ...c, work_mode: 'remote' });
-      else toOpen.push(c);
-    }
-    for (const card of toOpen) {
-      if (rateLimited || !inTime() || results.length >= limit) break;
+      const listedRemote = /\bremote\b/i.test(head);
+      // Open the posting (its text and LinkedIn industry also reveal staffing agencies).
+      // A job listed as remote is kept even if LinkedIn stops answering.
+      let posting: LinkedInPosting | null = null;
       const cached = postingCache.has(card.id);
-      try {
-        const posting = await linkedinPosting(card.id);
-        if (posting && isRemotePosting(card.title, card.location || '', posting.description)) {
-          results.push({ ...card, description: posting.description, industry: posting.industry, work_mode: 'remote' });
+      if (!rateLimited && inTime()) {
+        try {
+          posting = await linkedinPosting(card.id);
+        } catch (err) {
+          if (err instanceof RateLimited) rateLimited = true;
         }
-      } catch (err) {
-        if (err instanceof RateLimited) rateLimited = true;
+        if (!cached) await new Promise(r => setTimeout(r, LINKEDIN_POSTING_PAUSE_MS));
       }
-      if (!cached) await new Promise(r => setTimeout(r, LINKEDIN_POSTING_PAUSE_MS));
+      if (posting && (listedRemote || isRemotePosting(card.title, card.location || '', posting.description))) {
+        results.push({ ...card, description: posting.description, industry: posting.industry, work_mode: 'remote' });
+      } else if (!posting && listedRemote) {
+        results.push({ ...card, work_mode: 'remote' });
+      }
     }
   }
+
 
   for (let page = 0; page < LINKEDIN_MAX_PAGES && results.length < limit && !rateLimited && inTime(); page++) {
     if (page > 0) await new Promise(r => setTimeout(r, LINKEDIN_PAGE_PAUSE_MS));

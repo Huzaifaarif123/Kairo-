@@ -40,8 +40,6 @@ const PER_BOARD_FETCH = 30;
 const PER_BOARD_LIMIT = 20;
 const LINKEDIN_LIMIT = 40;
 const MAX_RESULTS = 150;
-// Staffing-agency postings come after every direct employer, and only a few are shown
-const MAX_STAFFING_RESULTS = 5;
 const CACHE_MS = 10 * 60 * 1000;
 
 type Job = Record<string, any> & { title: string; company?: string | null; date?: string | null; source: string; portal: string };
@@ -119,12 +117,9 @@ export async function searchAllBoards(params: SearchParams): Promise<{ results: 
   }
   const ranked = unique
     .map(j => ({ j, score: titleScore(params.query, j.title || ''), time: Date.parse(j.date || '') || 0 }))
-    .sort((a, b) => Number(Boolean(a.j.staffing)) - Number(Boolean(b.j.staffing))
-      || b.score - a.score || (position.get(a.j)! - position.get(b.j)!) || b.time - a.time)
+    .sort((a, b) => b.score - a.score || (position.get(a.j)! - position.get(b.j)!) || b.time - a.time)
     .map(x => x.j);
-  const direct = ranked.filter(j => !j.staffing);
-  const staffing = ranked.filter(j => j.staffing).slice(0, MAX_STAFFING_RESULTS);
-  const results = [...direct.slice(0, MAX_RESULTS - staffing.length), ...staffing];
+  const results = ranked.slice(0, MAX_RESULTS);
 
   const value = { results, boards };
   // Only cache complete answers, so a temporary failure isn't remembered

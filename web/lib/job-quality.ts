@@ -5,8 +5,8 @@
 // list the aggregator itself as the "company". Those are dropped, along with results
 // whose title isn't the role searched for and entries with broken data (no link, a job
 // title in the company field, "talent pool" sign-ups rather than openings).
-// Staffing and recruitment agencies (and talent marketplaces) are kept but flagged, so
-// search can rank them below jobs posted by the company that is hiring.
+// Staffing and recruitment agencies (and talent marketplaces) are dropped too: only
+// jobs posted by the company that is hiring are kept.
 
 // Sites that re-list jobs found elsewhere. A result linking here is not the original posting.
 const AGGREGATOR_DOMAINS = [
@@ -19,10 +19,10 @@ const AGGREGATOR_DOMAINS = [
 ];
 
 // Job search sites that sometimes appear as the "company" of a re-listed posting
-const AGGREGATOR_COMPANIES = /^(whatjobs|adzuna|jooble|jobbydoo|talent\.com|neuvoo|careerjet|jobrapido|jobsora|lensa|jobgether|jobleads|jobera|jobs for humanity|bebee|jobilize|jobtensor|getwork|simplyhired|ziprecruiter|glassdoor|indeed|remote rocketship|hiring cafe|jobicy|himalayas|remote ?ok|remotive|arbeitnow|freehire)\b/i;
+const AGGREGATOR_COMPANIES = /^(whatjobs|adzuna|jooble|jobbydoo|talent\.com|neuvoo|careerjet|jobrapido|jobsora|lensa|jobgether|jobleads|jobera|jobs for humanity|bebee|jobilize|jobtensor|getwork|simplyhired|ziprecruiter|glassdoor|indeed|remote rocketship|hiring cafe|jobicy|himalayas|remote ?ok|remotive|arbeitnow|freehire|third-party job posts|ladders|sports careers|uniprep|hiredbuddy)\b|^remote[_ ]?wfh/i;
 
 // Staffing and recruitment agencies, by the words in their name…
-const STAFFING_NAME = /\b(staffing|recruit(ment|ing|ers?)|head ?hunt\w*|manpower\w*|personnel|placements?|talent (acquisition|solutions|partners|search|group|bridge|hub)|employment (agency|services|solutions)|workforce solutions|executive search|search partners|staff augmentation|outstaffing)\b/i;
+const STAFFING_NAME = /\b(staff(ing|y|ers?)?|recruit\w*|head ?hunt\w*|manpower\w*|personnel|placements?|talent\w*|employment (agency|services|solutions)|workforce solutions|executive search|search (partners|group)|staff augmentation|outstaffing|hiring (partners?|solutions)|nearshore|offshore talent|resourcing)\b/i;
 
 // …or by name (well-known agencies and talent marketplaces)
 const STAFFING_FIRMS = [
@@ -34,16 +34,32 @@ const STAFFING_FIRMS = [
   'toptal', 'andela', 'bairesdev', 'lemon.io', 'mercor', 'micro1', 'braintrust', 'arc.dev', 'proxify',
   'jobs via dice', 'efinancialcareers', 'mindrift', 'outlier', 'dataannotation', 'remotasks',
   'crossover', 'turing', 'hired', 'dice', 'gun.io', 'x-team', 'revelo', 'deel talent', 'globalization partners',
-  'talently', 'talentgigs', 'teamex', 'hirewell', 'vettery', 'terminal.io', 'lemon', 'uplers', 'flexiple'
+  'talently', 'talentgigs', 'teamex', 'hirewell', 'vettery', 'terminal.io', 'lemon', 'uplers', 'flexiple',
+  'sand cherry', 'staffy', 'experis', 'cielo talent', 'alliance recruitment', 'tek ninjas', 'nexus staff',
+  'manpowergroup', 'scalable path', 'distillery', 'hire with near', 'nearsure', 'jobgether', 'the swift group',
+  'bowman williams', 'smith arnold', 'client server', 'top selection', 'fullstack', 'truelogic', 'hireway',
+  'computer futures', 'harnham', 'oliver bernard', 'burns sheehan', 'understanding recruitment', 'nigel frank',
+  'jefferson frank', 'tenth revolution', 'frank recruitment', 'haystack people', 'la fosse', 'opus recruitment',
+  'workethix', 'be-it resourcing', 'zachary piper', 'piper companies', 'nityo', 'resource informatics', 'microsourcing',
+  'emagine', 'remotestar', 'weekday', 'martsun', 'sequoia connect', 'pragmatike', 'bright vision technologies',
+  'hiredbuddy', 'fastcode', 'intellectsoft staff', 'ciklum talent', 'andela talent', 'it-hunter', 'it hunter',
+  'vgreen', 'itjobpro', 'jobs for software engineers'
 ];
+// Staffing words in other languages (Russian, Spanish, Portuguese, German, French, Polish)
+const STAFFING_NAME_INTL = /(кадров|рекрут|martsun|подбор персонала|reclutamiento|recrutamento|personalvermittlung|personaldienst|zeitarbeit|intérim|interim|cabinet de recrutement|rekrutacj|agencja pracy)/i;
 const STAFFING_FIRM_RE = new RegExp(`^(${STAFFING_FIRMS.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`, 'i');
 
 // …or by how the posting is written ("our client is…", "on behalf of our client")
-const STAFFING_TEXT = /\b(our client (is|are|seeks|seeking|based|has|,|a |an )|on behalf of (our|a|one of our) clients?|my client|we are (recruiting|hiring) (for|on behalf of) (a|an|our)|(staffing|recruitment|recruiting) (agency|firm|company|partner)|contract[- ]to[- ]hire|corp[- ]to[- ]corp|\bc2c\b)/i;
+const STAFFING_TEXT = /\b(our client (is|are|seeks|seeking|based|has|,|a |an |in |[a-z]+s )|(for|with) one of our clients|recruiting on behalf of|direct w2|(for|with) (our|a) (valued |leading |global |fortune \d+ )?client|client of ours|on behalf of (our|a|one of our) clients?|my client|we are (recruiting|hiring) (for|on behalf of) (a|an|our)|hiring for (a|one of) (our )?(leading |top )?clients?|(staffing|recruitment|recruiting|talent) (agency|firm|company|partner|marketplace|network)|contract[- ]to[- ]hire|corp[- ]to[- ]corp|\bc2c\b|\bw2 (only|contract)|join our (talent|developer) (pool|network|community))/i;
+
+// Real employers whose names contain those words (hiring software, not agencies)
+const NOT_AN_AGENCY = /^(recruitee|recruit holdings|recruitcrm|recruiterflow|talentlms|talend|talentsoft|staffbase|workforce software|hired score)\b/i;
 
 export function isStaffingAgency(company: string, description = '', industry = ''): boolean {
-  const name = company.trim();
-  return STAFFING_NAME.test(name) || STAFFING_FIRM_RE.test(name)
+  // Leading punctuation ("-WorkEthix") would stop name matching
+  const name = company.trim().replace(/^[^\p{L}\p{N}]+/u, '');
+  if (NOT_AN_AGENCY.test(name)) return false;
+  return STAFFING_NAME.test(name) || STAFFING_NAME_INTL.test(name) || STAFFING_FIRM_RE.test(name)
     || /staffing|recruiting/i.test(industry)
     || STAFFING_TEXT.test(description.slice(0, 4000));
 }
@@ -146,6 +162,7 @@ export function rejectReason(job: Job, ownDomains: string[] = []): string | null
   const onOwnSite = ownDomains.some(d => h === d || h.endsWith(`.${d}`) || h.startsWith(`${d}.`) || h.includes(`.${d}.`));
   if (!onOwnSite && isAggregatorUrl(url)) return 'links to another job search site';
   if (AGGREGATOR_COMPANIES.test(company)) return 'posted by a job search site';
+  if (isStaffingAgency(company, String(job.description || ''), String(job.industry || ''))) return 'staffing or recruitment agency';
   if (ROLE_AS_COMPANY.test(company) && !/\b(engineering|developers? (group|studio|inc|ltd|llc))\b/i.test(company)) return 'company name is a job title';
   if (NOT_AN_OPENING.test(title)) return 'not an actual opening';
   return null;
@@ -153,14 +170,13 @@ export function rejectReason(job: Job, ownDomains: string[] = []): string | null
 
 /** Keeps genuine postings for the role searched for; returns what was dropped, for logging. */
 export function vetJobs<T extends Job>(jobs: T[], query: string, opts: { ownDomains?: string[]; requireRoleNoun?: boolean; checkTitle?: boolean } = {}) {
-  const kept: (T & { staffing?: boolean })[] = [];
+  const kept: T[] = [];
   const dropped: { title: string; company: string; reason: string }[] = [];
   for (const j of jobs) {
     const reason = rejectReason(j, opts.ownDomains)
       || (opts.checkTitle !== false && query.trim() && !titleMatchesQuery(query, String(j.title || ''), { requireRoleNoun: opts.requireRoleNoun }) ? 'not the role searched for' : null);
     if (reason) dropped.push({ title: String(j.title || ''), company: String(j.company || ''), reason });
-    // Agency postings stay, flagged so they're ranked last
-    else kept.push(isStaffingAgency(String(j.company || ''), String(j.description || ''), String(j.industry || '')) ? { ...j, staffing: true } : j);
+    else kept.push(j);
   }
   return { kept, dropped };
 }

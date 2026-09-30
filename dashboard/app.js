@@ -715,7 +715,6 @@ function jobCardHtml(j, i, ageTag) {
         <div class="tags">
           ${ageTag ? `<span class="tag tag-age">${escapeHtml(ageTag)}</span>` : ''}
           ${j.source ? `<span class="tag tag-source">via ${escapeHtml(j.source)}</span>` : ''}
-          ${j.staffing ? '<span class="tag tag-staffing" title="Posted by a staffing or recruitment agency, not the hiring company">Staffing agency</span>' : ''}
           <span class="tag" title="${escapeHtml(allPlaces)}">${escapeHtml(place)}</span>
           ${j.countries && j.countries.length > 1 ? `<span class="tag" title="${escapeHtml(j.countries.map(c => c.toUpperCase()).join(', '))}">+${j.countries.length - 1} more ${j.countries.length === 2 ? 'location' : 'locations'}</span>` : ''}
           ${j.work_mode === 'remote' ? '<span class="tag">Remote</span>' : ''}
