@@ -33,10 +33,15 @@ export function vetBoardResults<T extends { title?: string | null; company?: str
 }
 
 const PER_BOARD_TIMEOUT_MS = 25000;
-// Ask each board for more than we show: the "posted within" filter removes some
-const PER_BOARD_FETCH = 25;
-const PER_BOARD_LIMIT = 15;
-const MAX_RESULTS = 90;
+// LinkedIn opens each posting to confirm it's remote, so it gets longer (and the most results)
+const LINKEDIN_TIMEOUT_MS = 45000;
+// Ask each board for more than we show: the "posted within" and quality checks remove some
+const PER_BOARD_FETCH = 30;
+const PER_BOARD_LIMIT = 20;
+const LINKEDIN_LIMIT = 40;
+const MAX_RESULTS = 150;
+// Staffing-agency postings come after every direct employer, and only a few are shown
+const MAX_STAFFING_RESULTS = 5;
 const CACHE_MS = 10 * 60 * 1000;
 
 type Job = Record<string, any> & { title: string; company?: string | null; date?: string | null; source: string; portal: string };
@@ -76,15 +81,18 @@ export async function searchAllBoards(params: SearchParams): Promise<{ results: 
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
 
-  const perBoard = { ...params, limit: PER_BOARD_FETCH };
-  const settled = await Promise.allSettled(BOARDS.map(b => withTimeout(b.run(perBoard), PER_BOARD_TIMEOUT_MS, b.label)));
+  const settled = await Promise.allSettled(BOARDS.map(b => {
+    const isLinkedIn = b.portal === 'linkedin';
+    const perBoard = { ...params, limit: isLinkedIn ? LINKEDIN_LIMIT : PER_BOARD_FETCH };
+    return withTimeout(b.run(perBoard), isLinkedIn ? LINKEDIN_TIMEOUT_MS : PER_BOARD_TIMEOUT_MS, b.label);
+  }));
 
   const boards: BoardStatus[] = [];
   const all: Job[] = [];
   settled.forEach((r, i) => {
     const b = BOARDS[i];
     if (r.status === 'fulfilled') {
-      const jobs = vetBoardResults(b.portal, r.value as Job[], params.query).slice(0, PER_BOARD_LIMIT).map(j => ({ ...j, source: b.label, portal: b.portal }));
+      const jobs = vetBoardResults(b.portal, r.value as Job[], params.query).slice(0, b.portal === 'linkedin' ? LINKEDIN_LIMIT : PER_BOARD_LIMIT).map(j => ({ ...j, source: b.label, portal: b.portal }));
       boards.push({ source: b.label, count: jobs.length });
       all.push(...jobs);
     } else {
@@ -111,11 +119,14 @@ export async function searchAllBoards(params: SearchParams): Promise<{ results: 
   }
   const ranked = unique
     .map(j => ({ j, score: titleScore(params.query, j.title || ''), time: Date.parse(j.date || '') || 0 }))
-    .sort((a, b) => b.score - a.score || (position.get(a.j)! - position.get(b.j)!) || b.time - a.time)
-    .map(x => x.j)
-    .slice(0, MAX_RESULTS);
+    .sort((a, b) => Number(Boolean(a.j.staffing)) - Number(Boolean(b.j.staffing))
+      || b.score - a.score || (position.get(a.j)! - position.get(b.j)!) || b.time - a.time)
+    .map(x => x.j);
+  const direct = ranked.filter(j => !j.staffing);
+  const staffing = ranked.filter(j => j.staffing).slice(0, MAX_STAFFING_RESULTS);
+  const results = [...direct.slice(0, MAX_RESULTS - staffing.length), ...staffing];
 
-  const value = { results: ranked, boards };
+  const value = { results, boards };
   // Only cache complete answers, so a temporary failure isn't remembered
   if (boards.every(b => !b.error)) cache.set(key, { at: Date.now(), value });
   if (cache.size > 100) cache.delete(cache.keys().next().value as string);

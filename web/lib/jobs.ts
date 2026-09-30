@@ -104,7 +104,11 @@ export async function searchFreehire(params: SearchParams) {
   const body = (await res.json().catch(() => null)) as { data?: FreehireJob[]; error?: string } | null;
   if (!res.ok) throw new Error(body?.error || `freehire API request failed: ${res.status}`);
 
-  return (body?.data || []).filter(j => isRecent(j.posted_at, params.maxAgeDays)).map(j => ({
+  return (body?.data || [])
+    .filter(j => isRecent(j.posted_at, params.maxAgeDays))
+    // Freehire is asked for remote jobs; also drop any it labels otherwise
+    .filter(j => !remoteOnly || j.work_mode === 'remote')
+    .map(j => ({
     id: j.public_slug,
     title: j.title || '(untitled)',
     company: j.company || null,
@@ -184,19 +188,69 @@ async function linkedinHtml(url: string): Promise<string> {
   return res.text();
 }
 
-export async function searchLinkedIn(sp: SearchParams) {
-  const { query, location, remoteOnly, limit } = sp;
-  const params = new URLSearchParams();
-  // LinkedIn's public listings ignore the workplace-type filter, so for
-  // remote-only searches also require the word "remote" in the posting
-  params.set('keywords', remoteOnly ? `${query} remote` : query);
-  params.set('location', LINKEDIN_REGIONS[location] || 'Worldwide');
-  if (remoteOnly) params.set('f_WT', '2');
-  if (sp.maxAgeDays) params.set('f_TPR', `r${sp.maxAgeDays * 86400}`);
-  params.set('start', '0');
+// LinkedIn's public listing ignores its own "remote" filter, so each posting is opened
+// and read to confirm it's remote. The posting also gives the description (shown on the
+// card) and LinkedIn's industry label (used to leave out staffing agencies).
+// LinkedIn rate-limits its public pages (HTTP 429) when requests arrive in bursts, but
+// accepts a steady stream (tested: 30+ postings in a row with a short gap). So pages and
+// postings are fetched one at a time with a short pause, and the first 429 stops further
+// requests for that search; whatever has been confirmed by then is returned.
+const LINKEDIN_PAGE_SIZE = 10;
+const LINKEDIN_MAX_PAGES = 6;
+const LINKEDIN_PAGE_PAUSE_MS = 400;
+const LINKEDIN_POSTING_PAUSE_MS = 120;
+// Stop opening postings after this long and return what's been confirmed
+const LINKEDIN_TIME_BUDGET_MS = 30000;
+const POSTING_CACHE_MS = 6 * 60 * 60 * 1000;
 
-  const html = await linkedinHtml(`${LINKEDIN_SEARCH}?${params}`);
-  const results = [];
+interface LinkedInPosting { description: string; industry: string }
+const postingCache = new Map<string, { at: number; value: LinkedInPosting }>();
+
+function postingFromHtml(html: string): LinkedInPosting {
+  let description = '';
+  const descHtml = extractDivContent(html, 'show-more-less-html__markup') ?? extractDivContent(html, 'description__text');
+  if (descHtml) {
+    const withBreaks = descHtml.replace(/<\s*br\s*\/?>/gi, '\n').replace(/<\/(p|li|ul|ol|div|h\d)>/gi, '\n');
+    description = decodeHtmlEntities(stripTags(withBreaks)).replace(/\n{3,}/g, '\n\n').trim();
+  }
+  const industry = html.match(/description__job-criteria-subheader[^>]*>\s*Industries\s*<\/h3>[\s\S]*?description__job-criteria-text[^>]*>([\s\S]*?)<\/span>/i)?.[1];
+  return { description, industry: industry ? clean(industry) : '' };
+}
+
+class RateLimited extends Error {}
+
+async function linkedinPosting(id: string): Promise<LinkedInPosting | null> {
+  const hit = postingCache.get(id);
+  if (hit && Date.now() - hit.at < POSTING_CACHE_MS) return hit.value;
+  // No retries here: retrying a rate-limited request only makes the limit last longer
+  const res = await fetch(`${LINKEDIN_DETAIL}/${id}`, { headers: LINKEDIN_HEADERS, cache: 'no-store', signal: AbortSignal.timeout(10000) }).catch(() => null);
+  if (res?.status === 429) throw new RateLimited('LinkedIn rate limit');
+  const html = res?.ok ? await res.text().catch(() => '') : '';
+  if (!html) return null;
+  const value = postingFromHtml(html);
+  postingCache.set(id, { at: Date.now(), value });
+  if (postingCache.size > 3000) postingCache.delete(postingCache.keys().next().value as string);
+  return value;
+}
+
+const REMOTE_YES = /\b(fully[- ]remote|100\s?% remote|remote[- ](first|only|friendly|position|role|job|opportunity|work(ing)?|team|contract|based|eligible)|work(ing)? (from home|from anywhere|remotely)|wfh|telecommut\w*|home[- ]based|anywhere in (the )?(world|us|usa|europe|emea|latam|apac)|this (is a|role is|position is|job is) (a )?(fully )?remote|remote\)|\(remote)/i;
+const REMOTE_NO = /\b(hybrid|on-?site|in[- ]office|office[- ]based|in the office|days? (a|per|each) week (in|at) (the|our)|relocat(e|ion) (to|is required)|not (a )?remote|no remote|non-remote)\b/i;
+
+/** Whether a posting is a remote job: clearly remote, and not hybrid or on-site. */
+export function isRemotePosting(title: string, location: string, description: string): boolean {
+  const head = `${title} ${location}`;
+  if (/\bhybrid|on-?site\b/i.test(head)) return false;
+  if (/\bremote\b/i.test(head)) return true;
+  const text = description.slice(0, 8000);
+  if (!REMOTE_YES.test(text)) return false;
+  // "fully remote" wins over a passing mention of an office
+  return !REMOTE_NO.test(text) || /\b(fully[- ]remote|100\s?% remote|remote[- ]first)\b/i.test(text);
+}
+
+interface LinkedInCard { id: string; title: string; company: string | null; companyUrl: string | null; location: string | null; date: string | null; url: string }
+
+function parseLinkedInCards(html: string, maxAgeDays?: number): LinkedInCard[] {
+  const cards: LinkedInCard[] = [];
   for (const chunk of html.split(/data-entity-urn="urn:li:jobPosting:/).slice(1)) {
     const idMatch = chunk.match(/^(\d+)/);
     if (!idMatch) continue;
@@ -225,21 +279,70 @@ export async function searchLinkedIn(sp: SearchParams) {
 
     const loc = chunk.match(/class="job-search-card__location"[^>]*>([\s\S]*?)<\/span>/i);
     const dt = chunk.match(/class="job-search-card__listdate[^"]*"[^>]*datetime="([^"]+)"/i);
-
     const date = dt ? dt[1] : null;
-    if (!isRecent(date, sp.maxAgeDays)) continue;
-    results.push({
-      id,
-      title,
-      company,
-      companyUrl,
-      location: loc ? clean(loc[1]) || null : null,
-      date,
-      url: url || `https://www.linkedin.com/jobs/view/${id}`
-    });
-    if (results.length >= limit) break;
+    if (!isRecent(date, maxAgeDays)) continue;
+    cards.push({ id, title, company, companyUrl, location: loc ? clean(loc[1]) || null : null, date, url: url || `https://www.linkedin.com/jobs/view/${id}` });
   }
-  return results;
+  return cards;
+}
+
+export async function searchLinkedIn(sp: SearchParams) {
+  const { query, location, remoteOnly, limit } = sp;
+  const started = Date.now();
+  const params = new URLSearchParams();
+  // Asking for "remote" in the keywords brings remote postings to the top
+  params.set('keywords', remoteOnly ? `${query} remote` : query);
+  params.set('location', LINKEDIN_REGIONS[location] || 'Worldwide');
+  if (remoteOnly) params.set('f_WT', '2');
+  if (sp.maxAgeDays) params.set('f_TPR', `r${sp.maxAgeDays * 86400}`);
+
+  type Result = LinkedInCard & { description?: string; industry?: string; work_mode?: string };
+  const results: Result[] = [];
+  const seen = new Set<string>();
+  let rateLimited = false;
+  const inTime = () => Date.now() - started < LINKEDIN_TIME_BUDGET_MS;
+
+  // Confirms which of a page's listings are remote, one posting at a time
+  async function keepRemote(cards: LinkedInCard[]) {
+    const toOpen: LinkedInCard[] = [];
+    for (const c of cards) {
+      const head = `${c.title} ${c.location || ''}`;
+      if (/\bhybrid\b|\bon-?site\b/i.test(head)) continue;
+      // Listed as remote: no need to open the posting
+      if (/\bremote\b/i.test(head)) results.push({ ...c, work_mode: 'remote' });
+      else toOpen.push(c);
+    }
+    for (const card of toOpen) {
+      if (rateLimited || !inTime() || results.length >= limit) break;
+      const cached = postingCache.has(card.id);
+      try {
+        const posting = await linkedinPosting(card.id);
+        if (posting && isRemotePosting(card.title, card.location || '', posting.description)) {
+          results.push({ ...card, description: posting.description, industry: posting.industry, work_mode: 'remote' });
+        }
+      } catch (err) {
+        if (err instanceof RateLimited) rateLimited = true;
+      }
+      if (!cached) await new Promise(r => setTimeout(r, LINKEDIN_POSTING_PAUSE_MS));
+    }
+  }
+
+  for (let page = 0; page < LINKEDIN_MAX_PAGES && results.length < limit && !rateLimited && inTime(); page++) {
+    if (page > 0) await new Promise(r => setTimeout(r, LINKEDIN_PAGE_PAUSE_MS));
+    params.set('start', String(page * LINKEDIN_PAGE_SIZE));
+    let html: string;
+    try {
+      html = await linkedinHtml(`${LINKEDIN_SEARCH}?${params}`);
+    } catch (err) {
+      if (page === 0) throw err;
+      break; // keep what the earlier pages gave
+    }
+    if (!html.includes('jobPosting:')) break;
+    const cards = parseLinkedInCards(html, sp.maxAgeDays).filter(c => !seen.has(c.id) && seen.add(c.id));
+    if (remoteOnly) await keepRemote(cards);
+    else results.push(...cards);
+  }
+  return results.slice(0, limit);
 }
 
 export async function linkedinDetail(id: string) {

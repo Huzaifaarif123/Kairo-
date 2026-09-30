@@ -33,6 +33,10 @@
           <svg viewBox="0 0 24 24"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>
           <span>Tailor CV</span>
         </button>
+        <button class="tab-btn" data-tab="cv-editor" data-short="Editor" role="tab">
+          <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/><path d="M14 20h6"/></svg>
+          <span>CV Editor</span>
+        </button>
         <button class="tab-btn" data-tab="cv-studio" data-short="CV" role="tab">
           <svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
           <span>CV Studio</span>
@@ -181,11 +185,6 @@
             <option value="EMEA">EMEA – Europe, Middle East &amp; Africa</option>
             <option value="NAMER">NAMER – North America</option>
           </select>
-          <label class="switch search-remote">
-            <input type="checkbox" id="search-remote-only">
-            <span class="switch-track"></span>
-            Remote only
-          </label>
           <button class="btn btn-primary" id="btn-run-search" onclick="executeJobSearch()">
             <span>Search</span>
           </button>
@@ -261,8 +260,8 @@ Requirements:
             </div>
 
             <div class="btn-row">
-              <button class="btn btn-primary" onclick="saveEvaluatedJobToPipeline()">Save to pipeline</button>
-              <button class="btn btn-secondary" onclick="switchTab('cv-studio')">Open CV Studio</button>
+              <button class="btn btn-primary" onclick="tailorFromEvaluator()">Tailor CV for this job</button>
+              <button class="btn btn-secondary" onclick="saveEvaluatedJobToPipeline()">Save to pipeline</button>
             </div>
           </div>
         </div>
@@ -328,7 +327,7 @@ Requirements:
               <button class="btn btn-primary btn-block" id="tailor-run" onclick="runTailor()">Tailor my CV</button>
               <p class="tailor-note">
                 <svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
-                Uses only facts from your profile. Nothing is invented.
+                Uses only facts from your profile and skills you confirm. Nothing is invented.
               </p>
             </div>
 
@@ -339,7 +338,7 @@ Requirements:
                     <div class="score-ring-inner"><span class="num" id="tailor-score-num">0%</span></div>
                   </div>
                   <div>
-                    <h2 class="card-title">Requirement match</h2>
+                    <h2 class="card-title">CV match</h2>
                     <p class="muted" id="tailor-score-text"></p>
                   </div>
                 </div>
@@ -350,12 +349,22 @@ Requirements:
                 <div id="tailor-gap-block" hidden>
                   <h3 class="tailor-sub">Not in your profile</h3>
                   <div class="req-chips" id="tailor-missing"></div>
-                  <p class="tailor-hint">These weren't added to your CV. If you do have this experience, add it to your profile and tailor again. If not, mention related experience in your cover letter.</p>
+                  <p class="tailor-hint">These aren't in your CV yet. If you really have a skill, click <strong>+ I have this</strong> and it's added to your skills section and counted in the match. Only confirm skills you can back up in an interview. Items marked <em>alternative</em>, <em>example</em>, <em>soft skill</em> or <em>nice to have</em> don't lower your score.</p>
                 </div>
+              </div>
+
+              <div class="card cve-card" id="tailor-edit-card" hidden>
+                <div class="card-head">
+                  <h2 class="card-title">Edit CV</h2>
+                  <button class="btn-link" onclick="toggleTailorEditor()">Close</button>
+                </div>
+                <p class="muted-sm cve-note">Edit any part of the tailored CV. The preview, the CV match and the downloads update as you type.</p>
+                <div id="tailor-editor-body" class="cve"></div>
               </div>
 
               <div class="card">
                 <h2 class="card-title tailor-changes-title">What changed</h2>
+                <p class="tailor-ai-note" id="tailor-ai-note" hidden></p>
                 <ul class="tailor-changes" id="tailor-changes"></ul>
               </div>
             </div>
@@ -377,6 +386,7 @@ Requirements:
             <div id="tailor-preview" hidden>
               <div class="card tailor-toolbar">
                 <div class="tailor-toolbar-left">
+                  <select class="input select layout-select" id="tailor-layout" aria-label="CV layout" onchange="setTailorLayout(this.value)" hidden></select>
                   <span class="mono-tag" id="tailor-file"></span>
                   <label class="switch">
                     <input type="checkbox" id="tailor-highlight" checked onchange="renderTailorPreview()">
@@ -388,15 +398,55 @@ Requirements:
                   <button class="btn btn-secondary" onclick="copyTailoredText()">Copy text</button>
                   <button class="btn btn-secondary" onclick="downloadTailoredTex()">Download .tex</button>
                   <button class="btn btn-secondary" onclick="saveTailoredToProject()">Save to cv/</button>
-                  <button class="btn btn-primary" onclick="downloadTailoredPdf()">
+                  <button class="btn btn-secondary" onclick="toggleTailorEditor()">Edit CV</button>
+                  <button class="btn btn-primary" onclick="downloadTailoredPdf(this)">
                     <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>
                     <span>Download PDF</span>
                   </button>
                 </div>
               </div>
+              <div class="card cv-style-bar" id="tailor-style-bar" role="toolbar" aria-label="CV styling" hidden></div>
               <div class="paper">
                 <iframe id="tailor-frame" title="Tailored CV preview"></iframe>
               </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CV Editor: edit and style your own CV (from the profile or blank) -->
+      <section id="tab-cv-editor" class="tab-content">
+        <div class="tailor-layout" id="own-workspace" hidden>
+          <div class="tailor-side">
+            <div class="card cve-card">
+              <div class="card-head">
+                <h2 class="card-title">Your CV</h2>
+                <div class="cve-start">
+                  <button class="btn-link" onclick="ownStartFromProfile()">Reload from profile</button>
+                  <button class="btn-link" onclick="ownStartBlank()">Start blank</button>
+                </div>
+              </div>
+              <p class="muted-sm cve-note" id="own-draft-note">Changes are saved as a draft on this device.</p>
+              <div id="own-editor-body" class="cve"></div>
+            </div>
+          </div>
+          <div class="tailor-main">
+            <div class="card tailor-toolbar">
+              <div class="tailor-toolbar-left">
+                <select class="input select layout-select" id="own-layout" aria-label="CV layout" onchange="setOwnLayout(this.value)"></select>
+              </div>
+              <div class="tailor-actions">
+                <button class="btn btn-secondary" onclick="ownCopyText()">Copy text</button>
+                <button class="btn btn-secondary" onclick="ownDownloadTex()">Download .tex</button>
+                <button class="btn btn-primary" onclick="cveDownloadPdf(ownWs, this, ownPrintPdf)">
+                  <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>
+                  <span>Download PDF</span>
+                </button>
+              </div>
+            </div>
+            <div class="card cv-style-bar" id="own-style-bar" role="toolbar" aria-label="CV styling" hidden></div>
+            <div class="paper">
+              <iframe id="own-frame" title="CV preview"></iframe>
             </div>
           </div>
         </div>

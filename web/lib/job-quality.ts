@@ -5,6 +5,8 @@
 // list the aggregator itself as the "company". Those are dropped, along with results
 // whose title isn't the role searched for and entries with broken data (no link, a job
 // title in the company field, "talent pool" sign-ups rather than openings).
+// Staffing and recruitment agencies (and talent marketplaces) are kept but flagged, so
+// search can rank them below jobs posted by the company that is hiring.
 
 // Sites that re-list jobs found elsewhere. A result linking here is not the original posting.
 const AGGREGATOR_DOMAINS = [
@@ -18,6 +20,33 @@ const AGGREGATOR_DOMAINS = [
 
 // Job search sites that sometimes appear as the "company" of a re-listed posting
 const AGGREGATOR_COMPANIES = /^(whatjobs|adzuna|jooble|jobbydoo|talent\.com|neuvoo|careerjet|jobrapido|jobsora|lensa|jobgether|jobleads|jobera|jobs for humanity|bebee|jobilize|jobtensor|getwork|simplyhired|ziprecruiter|glassdoor|indeed|remote rocketship|hiring cafe|jobicy|himalayas|remote ?ok|remotive|arbeitnow|freehire)\b/i;
+
+// Staffing and recruitment agencies, by the words in their name…
+const STAFFING_NAME = /\b(staffing|recruit(ment|ing|ers?)|head ?hunt\w*|manpower\w*|personnel|placements?|talent (acquisition|solutions|partners|search|group|bridge|hub)|employment (agency|services|solutions)|workforce solutions|executive search|search partners|staff augmentation|outstaffing)\b/i;
+
+// …or by name (well-known agencies and talent marketplaces)
+const STAFFING_FIRMS = [
+  'robert half', 'randstad', 'adecco', 'kelly services', 'hays', 'michael page', 'pagegroup', 'page group',
+  'aerotek', 'teksystems', 'insight global', 'kforce', 'apex systems', 'allegis', 'modis', 'akkodis',
+  'harvey nash', 'russell tobin', 'jobot', 'cybercoders', 'motion recruitment', 'robert walters',
+  'korn ferry', 'spherion', 'express employment', 'beacon hill', 'collabera', 'mindlance', 'diverse lynx',
+  'infojini', 'talentvis', 'nsearch', 'anson mccade', 'yellowshark', 'myticas', 'alois', 'hirequest',
+  'toptal', 'andela', 'bairesdev', 'lemon.io', 'mercor', 'micro1', 'braintrust', 'arc.dev', 'proxify',
+  'jobs via dice', 'efinancialcareers', 'mindrift', 'outlier', 'dataannotation', 'remotasks',
+  'crossover', 'turing', 'hired', 'dice', 'gun.io', 'x-team', 'revelo', 'deel talent', 'globalization partners',
+  'talently', 'talentgigs', 'teamex', 'hirewell', 'vettery', 'terminal.io', 'lemon', 'uplers', 'flexiple'
+];
+const STAFFING_FIRM_RE = new RegExp(`^(${STAFFING_FIRMS.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`, 'i');
+
+// …or by how the posting is written ("our client is…", "on behalf of our client")
+const STAFFING_TEXT = /\b(our client (is|are|seeks|seeking|based|has|,|a |an )|on behalf of (our|a|one of our) clients?|my client|we are (recruiting|hiring) (for|on behalf of) (a|an|our)|(staffing|recruitment|recruiting) (agency|firm|company|partner)|contract[- ]to[- ]hire|corp[- ]to[- ]corp|\bc2c\b)/i;
+
+export function isStaffingAgency(company: string, description = '', industry = ''): boolean {
+  const name = company.trim();
+  return STAFFING_NAME.test(name) || STAFFING_FIRM_RE.test(name)
+    || /staffing|recruiting/i.test(industry)
+    || STAFFING_TEXT.test(description.slice(0, 4000));
+}
 
 // Sign-up pools and open applications, not actual openings
 const NOT_AN_OPENING = /\b(talent pool|talent community|talent network|general application|open application|spontaneous application|expression of interest|future opportunities)\b/i;
@@ -99,7 +128,7 @@ export function isAggregatorUrl(url: string): boolean {
   return AGGREGATOR_DOMAINS.some(d => (d.includes('/') ? full.includes(d) : h === d || h.endsWith(`.${d}`) || h.includes(`${d}.`) || h === `${d}.com`));
 }
 
-type Job = { title?: string | null; company?: string | null; url?: string | null };
+type Job = { title?: string | null; company?: string | null; url?: string | null; description?: string | null; industry?: string | null };
 
 /**
  * Why a result isn't a genuine posting, or null if it is.
@@ -124,13 +153,14 @@ export function rejectReason(job: Job, ownDomains: string[] = []): string | null
 
 /** Keeps genuine postings for the role searched for; returns what was dropped, for logging. */
 export function vetJobs<T extends Job>(jobs: T[], query: string, opts: { ownDomains?: string[]; requireRoleNoun?: boolean; checkTitle?: boolean } = {}) {
-  const kept: T[] = [];
+  const kept: (T & { staffing?: boolean })[] = [];
   const dropped: { title: string; company: string; reason: string }[] = [];
   for (const j of jobs) {
     const reason = rejectReason(j, opts.ownDomains)
       || (opts.checkTitle !== false && query.trim() && !titleMatchesQuery(query, String(j.title || ''), { requireRoleNoun: opts.requireRoleNoun }) ? 'not the role searched for' : null);
     if (reason) dropped.push({ title: String(j.title || ''), company: String(j.company || ''), reason });
-    else kept.push(j);
+    // Agency postings stay, flagged so they're ranked last
+    else kept.push(isStaffingAgency(String(j.company || ''), String(j.description || ''), String(j.industry || '')) ? { ...j, staffing: true } : j);
   }
   return { kept, dropped };
 }

@@ -284,6 +284,7 @@ function switchTab(tabId) {
   if (tabId === 'overview') {
     renderCharts();
   }
+  if (tabId === 'cv-editor') openCvEditor();
 }
 
 // Load Application Tracker Data from API / LocalStorage
@@ -567,11 +568,11 @@ function handleDrop(event, targetStatus) {
 async function executeJobSearch() {
   const query = document.getElementById('search-query-input').value.trim();
   const location = document.getElementById('search-location-select').value;
-  const remoteOnly = document.getElementById('search-remote-only').checked;
+  // Every search is for remote roles; the region is where the role is open to
   const statusBar = document.getElementById('search-status-bar');
   const button = document.getElementById('btn-run-search');
 
-  const where = `${remoteOnly ? 'remote roles in ' : ''}${escapeHtml(location)}`;
+  const where = `remote roles open to ${escapeHtml(location)}`;
   setNotice(statusBar, 'info', `Searching all job boards for “${escapeHtml(query)}” — ${where}…`);
   renderSearchSkeleton();
   document.getElementById('age-filter').hidden = true;
@@ -583,7 +584,7 @@ async function executeJobSearch() {
     const res = await fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, portal: 'all', location, remoteOnly, limit: 10, maxAgeDays: MAX_JOB_AGE_DAYS })
+      body: JSON.stringify({ query, portal: 'all', location, remoteOnly: true, maxAgeDays: MAX_JOB_AGE_DAYS })
     });
     const data = await res.json().catch(() => ({}));
     if (res.ok) {
@@ -592,11 +593,10 @@ async function executeJobSearch() {
       const boards = data.boards || [];
       const found = boards.filter(b => b.count > 0).map(b => `${escapeHtml(b.source)} ${b.count}`).join(' · ');
       const failed = boards.filter(b => b.error);
-      let html = `Found <strong>${results.length}</strong> ${results.length === 1 ? 'role' : 'roles'} posted in the last ${MAX_JOB_AGE_DAYS} days across ${boards.length - failed.length} job boards — ${where}.`;
+      let html = `Found <strong>${results.length}</strong> remote ${results.length === 1 ? 'role' : 'roles'} posted in the last ${MAX_JOB_AGE_DAYS} days across ${boards.length - failed.length} job boards — ${where}.`;
       if (found) html += `<br><span class="board-counts">${found}</span>`;
       if (failed.length) html += `<br>Not available right now: ${failed.map(b => escapeHtml(b.source)).join(', ')}.`;
-      if (data.remoteApprox) html += '<br>LinkedIn can’t filter by remote, so its results are roles that mention “remote” — check those postings.';
-      setNotice(statusBar, failed.length || data.remoteApprox ? 'warn' : 'info', html);
+      setNotice(statusBar, failed.length ? 'warn' : 'info', html);
       button.disabled = false;
       return;
     }
@@ -715,6 +715,7 @@ function jobCardHtml(j, i, ageTag) {
         <div class="tags">
           ${ageTag ? `<span class="tag tag-age">${escapeHtml(ageTag)}</span>` : ''}
           ${j.source ? `<span class="tag tag-source">via ${escapeHtml(j.source)}</span>` : ''}
+          ${j.staffing ? '<span class="tag tag-staffing" title="Posted by a staffing or recruitment agency, not the hiring company">Staffing agency</span>' : ''}
           <span class="tag" title="${escapeHtml(allPlaces)}">${escapeHtml(place)}</span>
           ${j.countries && j.countries.length > 1 ? `<span class="tag" title="${escapeHtml(j.countries.map(c => c.toUpperCase()).join(', '))}">+${j.countries.length - 1} more ${j.countries.length === 2 ? 'location' : 'locations'}</span>` : ''}
           ${j.work_mode === 'remote' ? '<span class="tag">Remote</span>' : ''}
@@ -763,6 +764,11 @@ async function runFitEvaluation() {
   const title = document.getElementById('eval-job-title').value;
   const company = document.getElementById('eval-company-name').value;
   const description = document.getElementById('eval-job-desc').value;
+  if (!description.trim()) {
+    showToast('Paste the job description first');
+    document.getElementById('eval-job-desc').focus();
+    return;
+  }
 
   try {
     const res = await fetch(apiUrl('/api/evaluate'), {
@@ -780,28 +786,9 @@ async function runFitEvaluation() {
     console.warn('Client-side scoring calculation', err);
   }
 
-  // Client-side instant evaluation fallback
-  const text = `${title} ${description}`.toLowerCase();
-  let techScore = 92;
-  if (text.includes('python') && (text.includes('react') || text.includes('next.js'))) techScore = 96;
-  if (text.includes('claude') || text.includes('ai') || text.includes('mcp')) techScore = 98;
-
-  updateEvaluatorUI({
-    overallScore: Math.round((techScore + 95 + 94 + 100 + 92) / 5),
-    verdict: 'Exceptional Match',
-    breakdown: {
-      technical: techScore,
-      experience: 95,
-      behavioral: 94,
-      location: 100,
-      career: 92
-    },
-    strengths: [
-      'Direct 8+ years experience with Python, Django REST Framework, React, Next.js, and PostgreSQL.',
-      'Quantified results: 38% API latency reduction and 55% task completion speedup.',
-      'Anthropic MCP & Claude Code certification ready for agentic workflow tasks.'
-    ]
-  });
+  // No made-up score: say what went wrong instead
+  resetEvaluator();
+  showToast('Could not score this job right now. Check your connection and try again.');
 }
 
 function updateEvaluatorUI(data) {
@@ -836,9 +823,14 @@ function updateEvaluatorUI(data) {
 function sendToEvaluator(title, company, description) {
   document.getElementById('eval-job-title').value = title;
   document.getElementById('eval-company-name').value = company;
-  document.getElementById('eval-job-desc').value = description || `${title} at ${company}. Python, Django, React, Next.js, TypeScript, PostgreSQL, and AWS.`;
+  document.getElementById('eval-job-desc').value = description || '';
   switchTab('evaluator');
-  runFitEvaluation();
+  // Never score against an invented description
+  if (description && description.trim()) runFitEvaluation();
+  else {
+    resetEvaluator();
+    showToast('This job has no description saved. Paste it in to score the fit.');
+  }
 }
 
 function rescoreApplication(idx) {

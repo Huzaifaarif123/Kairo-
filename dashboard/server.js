@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { tailorCV, saveTailoredCV } from './tailor.js';
+import { tailorCV, saveTailoredCV, renderTailoredCV, profileToCV } from './tailor.js';
+import { compileLatexWithRetry, LatexCompileError } from './latex-compile.js';
 import { resolveProfile, listProfiles, profileDetails, usesOriginalOwner, readProfileMarkdown, writeProfileMarkdown, evaluateAgainstProfile } from './profiles.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -235,12 +236,69 @@ const server = http.createServer(async (req, res) => {
   }
 
   // CV tailoring (see tailor.js)
+  // Edit CV / CV Editor: re-render an edited CV, start from the profile, real PDF
+  if (pathname === '/api/cv/from-profile' && req.method === 'GET') {
+    const cv = profileToCV(readProfileMarkdown(profile));
+    const ok = cv.name || cv.experience.length;
+    res.writeHead(ok ? 200 : 422, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(ok ? renderTailoredCV(cv, {}, '') : { error: `The ${profile.label} profile is still empty. Fill it in first, or start from a blank CV.` }));
+    return;
+  }
+
+  if ((pathname === '/api/cv/render' || pathname === '/api/cv/pdf') && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; if (body.length > 300000) req.destroy(); });
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body || '{}');
+        if (!data.cv || typeof data.cv !== 'object') throw Object.assign(new Error('Nothing to render.'), { status: 400 });
+        const job = data.job && typeof data.job === 'object' ? data.job : {};
+        const jobInput = {
+          title: String(job.title || '').slice(0, 200),
+          company: String(job.company || '').slice(0, 200),
+          description: String(job.description || '').slice(0, 30000),
+          confirmedSkills: Array.isArray(job.confirmedSkills) ? job.confirmedSkills.map(String).slice(0, 60) : []
+        };
+        const options = { template: String(data.template || ''), styles: data.styles && typeof data.styles === 'object' ? data.styles : {} };
+        const rendered = renderTailoredCV(data.cv, jobInput, jobInput.description ? readProfileMarkdown(profile) : '', options);
+        if (pathname === '/api/cv/render') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(rendered));
+          return;
+        }
+        if (!rendered.cv.name) throw Object.assign(new Error('Add your name before downloading.'), { status: 400 });
+        const pdf = await compileLatexWithRetry(rendered.latex);
+        const safeName = `${rendered.cv.name}-CV`.replace(/[^A-Za-z0-9 _-]+/g, '').replace(/\s+/g, '_').slice(0, 60) || 'CV';
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${safeName}.pdf"` });
+        res.end(pdf);
+      } catch (err) {
+        const status = err instanceof LatexCompileError ? 502 : err.status || (err instanceof SyntaxError ? 400 : 500);
+        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err instanceof LatexCompileError
+          ? (err.code === 'COMPILER_UNAVAILABLE' ? 'The PDF service is not reachable right now. Try again, or download the .tex file.' : 'This CV could not be compiled to PDF. Download the .tex file to see why.')
+          : err.message }));
+      }
+    });
+    return;
+  }
+
   if (pathname === '/api/tailor' && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => {
       try {
-        const { title = '', company = '', description = '', save = false } = JSON.parse(body || '{}');
+        const { title = '', company = '', description = '', save = false, confirmedSkills = [], latex, filename, template = '', styles = {} } = JSON.parse(body || '{}');
+        // "Save to cv/": the exact CV on screen
+        if (save && typeof latex === 'string' && typeof filename === 'string') {
+          if (!/^main_[A-Za-z0-9_]+\.tex$/.test(filename) || !latex.trim() || latex.length > 300000) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Nothing valid to save.' }));
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ savedTo: saveTailoredCV({ filename, latex }, ROOT_DIR) }));
+          return;
+        }
         if (!description.trim()) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Paste a job description first.' }));
@@ -252,7 +310,9 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: 'Candidate profile not found. Run /setup first.' }));
           return;
         }
-        const result = tailorCV({ title, company, description }, profileMd);
+        // Skills the candidate confirmed they have, for gaps their profile doesn't mention
+        const confirmed = Array.isArray(confirmedSkills) ? confirmedSkills.map(String).filter(s => s.trim() && s.length <= 60).slice(0, 60) : [];
+        const result = tailorCV({ title, company, description, confirmedSkills: confirmed }, profileMd, { template: String(template || ''), styles: styles && typeof styles === 'object' ? styles : {} });
         if (!result.cv.name || !result.cv.experience.length) {
           res.writeHead(422, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: `The ${profile.label} profile is still empty. Fill in its name and experience first.` }));

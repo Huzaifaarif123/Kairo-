@@ -124,6 +124,7 @@ async function switchProfile(id) {
   applyProfileIdentity();
   resetEvaluator();
   resetTailor();
+  cveProfileChanged();
 
   await loadTrackerData();
   renderKanban();
@@ -153,6 +154,11 @@ function resetEvaluator() {
 
 function resetTailor() {
   tailorResult = null;
+  tailorWs.cv = null;
+  tailorWs.result = null;
+  tailorWs.edited = false;
+  document.getElementById('tailor-edit-card').hidden = true;
+  document.getElementById('tailor-style-bar').hidden = true;
   document.getElementById('tailor-analysis').hidden = true;
   document.getElementById('tailor-preview').hidden = true;
   document.getElementById('tailor-empty').hidden = false;

@@ -6,48 +6,43 @@ PAGES.tailor = ['Tailor CV', 'Reshape your CV around a specific job description.
 
 let tailorResult = null;
 
-const CV_DOC_CSS = `
-  @page { size: A4; margin: 16mm 16mm 18mm; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; color: #1d2433; font-size: 10pt; line-height: 1.45; background: #fff; }
-  .page { padding: 40px 44px 48px; }
-  .cv-header { border-bottom: 2px solid #2f4ea8; padding-bottom: 12px; margin-bottom: 14px; }
-  h1 { font-size: 24pt; font-weight: 700; letter-spacing: -0.02em; color: #1f3a8a; line-height: 1.1; }
-  .cv-headline { font-size: 11.5pt; font-weight: 500; color: #3b4658; margin-top: 4px; }
-  .cv-contact { font-size: 9.5pt; color: #5b6475; margin-top: 6px; }
-  .cv-contact span { margin: 0 6px; color: #a0a7b4; }
-  section { margin-top: 12px; }
-  h2 { font-size: 9.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #1f3a8a; margin-bottom: 6px; }
-  p { color: #2b3445; }
-  ul { padding-left: 16px; }
-  li { margin: 2px 0; color: #2b3445; }
-  li::marker { color: #8a93a5; }
-  .cv-skills { list-style: none; padding-left: 0; }
-  .cv-skills li { margin: 2px 0; }
-  .cv-job { margin-top: 10px; break-inside: avoid; }
-  .cv-job:first-of-type { margin-top: 0; }
-  .cv-job-head { display: flex; justify-content: space-between; gap: 12px; margin-top: 4px; }
-  .cv-job-head span { color: #5b6475; white-space: nowrap; font-size: 9.5pt; }
-  .cv-job-loc { font-size: 9.5pt; color: #6b7384; margin-bottom: 2px; }
-  strong { font-weight: 600; color: #1d2433; }
-  mark { background: none; color: inherit; }
-  body.highlight mark { background: #fff2b3; border-radius: 2px; box-shadow: 0 0 0 1px #fff2b3; }
-  @media print { .page { padding: 0; } body.highlight mark { background: none; box-shadow: none; } }
-  body { overflow-wrap: anywhere; }
-  @media screen and (max-width: 600px) {
-    .page { padding: 22px 18px 28px; }
-    h1 { font-size: 20pt; }
-    .cv-headline { font-size: 11pt; }
-    .cv-job-head { flex-wrap: wrap; gap: 0 8px; }
-    .cv-job-head span { white-space: normal; }
-    ul { padding-left: 14px; }
-  }
-`;
+// Skills the candidate confirmed for the current job (gaps their profile doesn't mention)
+const tailorConfirmed = new Set();
+let tailorJobKey = '';
 
-function cvDocument(html, title, highlight) {
+// The CV layout's own styles come with the result, so the preview matches the LaTeX
+// CV layout chosen in the toolbar (remembered on this device)
+let tailorLayout = 'ats-classic';
+try { tailorLayout = localStorage.getItem('cvLayout') || tailorLayout; } catch (e) {}
+
+// The tailored CV in the chosen layout (every layout comes with each result)
+function currentLayout() {
+  const r = tailorResult;
+  return (r.layouts && (r.layouts[tailorLayout] || r.layouts[r.template])) || { html: r.html, css: r.css, latex: r.latex };
+}
+
+function setTailorLayout(id) {
+  tailorLayout = id;
+  try { localStorage.setItem('cvLayout', id); } catch (e) {}
+  // The style toolbar shows this layout's own choices
+  tailorWs.layout = id;
+  tailorWs.menu = null;
+  renderStyleBar(tailorWs);
+  renderTailorPreview();
+}
+
+function renderLayoutPicker() {
+  const select = document.getElementById('tailor-layout');
+  const layouts = tailorResult.layouts || {};
+  if (!layouts[tailorLayout]) tailorLayout = tailorResult.template || Object.keys(layouts)[0] || tailorLayout;
+  select.innerHTML = Object.entries(layouts).map(([id, l]) => `<option value="${escapeHtml(id)}"${id === tailorLayout ? ' selected' : ''}>${escapeHtml(l.label)}</option>`).join('');
+  select.hidden = Object.keys(layouts).length < 2;
+}
+
+// A CV as a standalone page for the preview frame and printing (css: the layout's styles)
+function cvDocument(html, title, highlight, css) {
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap">
-<style>${CV_DOC_CSS}</style></head><body class="${highlight ? 'highlight' : ''}"><div class="page">${html}</div></body></html>`;
+<style>${css != null ? css : currentLayout().css}</style></head><body class="${highlight ? 'highlight' : ''}"><div class="page">${html}</div></body></html>`;
 }
 
 function importFromEvaluator() {
@@ -64,25 +59,64 @@ function importFromEvaluator() {
   showToast('Job imported from Evaluate');
 }
 
-async function runTailor() {
+// "Tailor CV for this job" on the Evaluate tab: fill in the job and build the CV
+function tailorJob(title, company, description) {
+  if (!String(description || '').trim()) {
+    showToast('Add the job description first');
+    return;
+  }
+  document.getElementById('tailor-title').value = title || '';
+  document.getElementById('tailor-company').value = company || '';
+  document.getElementById('tailor-desc').value = description;
+  switchTab('tailor');
+  runTailor();
+}
+
+function tailorFromEvaluator() {
+  tailorJob(
+    document.getElementById('eval-job-title').value,
+    document.getElementById('eval-company-name').value,
+    document.getElementById('eval-job-desc').value
+  );
+}
+
+// Confirm or remove a skill the profile doesn't mention. The score and skills update
+// straight away; Claude's wording is refreshed with "Rewrite with Claude" when ready.
+function toggleConfirmedSkill(name) {
+  if (tailorConfirmed.has(name)) tailorConfirmed.delete(name);
+  else tailorConfirmed.add(name);
+  runTailor({ ai: false });
+}
+
+// ai: false skips Claude's rewrite (quick update after confirming a skill)
+async function runTailor({ ai = true } = {}) {
   const title = document.getElementById('tailor-title').value.trim();
   const company = document.getElementById('tailor-company').value.trim();
   const description = document.getElementById('tailor-desc').value.trim();
   const button = document.getElementById('tailor-run');
+
+  // Confirmed skills belong to one job; start fresh when the job changes
+  const key = `${title}\n${company}\n${description}`;
+  if (key !== tailorJobKey) {
+    tailorConfirmed.clear();
+    tailorJobKey = key;
+  }
 
   if (!description) {
     showToast('Paste the job description first');
     document.getElementById('tailor-desc').focus();
     return;
   }
+  // Tailoring again rebuilds the CV from the profile
+  if (tailorWs.edited && !confirm('Tailoring again replaces the edits you made in Edit CV. Continue?')) return;
 
   button.disabled = true;
-  button.textContent = 'Tailoring…';
+  button.textContent = ai ? 'Tailoring… (this can take up to a minute)' : 'Updating…';
   try {
     const res = await fetch(apiUrl('/api/tailor'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, company, description })
+      body: JSON.stringify({ title, company, description, confirmedSkills: [...tailorConfirmed], ai, template: tailorLayout, styles: tailorWs.styles })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Tailoring failed');
@@ -96,44 +130,93 @@ async function runTailor() {
   }
 }
 
-function renderTailorResult() {
+// The ring is the CV match: how much of what you meet the tailored CV shows (100% once
+// tailored). Job fit (required skills you have at all) is shown underneath. Also called
+// after each edit in Edit CV, since editing can remove a skill from the CV.
+function renderTailorScore() {
   const r = tailorResult;
   const { analysis } = r;
   const req = analysis.matched.filter(m => m.required).length;
   const reqTotal = req + analysis.missing.filter(m => m.required).length;
-
+  const cov = r.coverage || { cvScore: analysis.matchScore, cvShown: req, cvNeeded: req, notShown: [] };
   const ring = document.getElementById('tailor-score');
-  ring.style.setProperty('--score', analysis.matchScore);
+  ring.style.setProperty('--score', cov.cvScore);
   ring.classList.remove('good', 'fair', 'low');
-  ring.classList.add(analysis.matchScore >= 75 ? 'good' : analysis.matchScore >= 50 ? 'fair' : 'low');
-  document.getElementById('tailor-score-num').textContent = `${analysis.matchScore}%`;
-  document.getElementById('tailor-score-text').innerHTML = reqTotal
-    ? `You cover <strong>${req} of ${reqTotal}</strong> required skills in this posting.`
-    : `No specific required skills were detected in this posting.`;
+  ring.classList.add(cov.cvScore >= 75 ? 'good' : cov.cvScore >= 50 ? 'fair' : 'low');
+  document.getElementById('tailor-score-num').textContent = `${cov.cvScore}%`;
+  const gaps = reqTotal - req;
+  document.getElementById('tailor-score-text').innerHTML = !reqTotal
+    ? 'No specific required skills were detected in this posting.'
+    : (cov.cvScore === 100
+      ? `This CV shows <strong>all ${cov.cvShown}</strong> of the posting's required skills that you meet.`
+      : `This CV shows <strong>${cov.cvShown} of ${cov.cvNeeded}</strong> required skills you meet (missing: ${escapeHtml(cov.notShown.join(', '))}).`)
+      + `<span class="tailor-fit">Job fit: you meet <strong>${req} of ${reqTotal}</strong> required skills (${analysis.matchScore}%)${gaps
+        ? `. ${gaps === 1 ? 'One is' : `${gaps} are`} not in your profile: click <strong>+ I have this</strong> below if you have ${gaps === 1 ? 'it' : 'them'}.`
+        : '.'}</span>`;
+}
 
-  const chip = (m, kind) => `<span class="req-chip ${kind}">${escapeHtml(m.name)}${m.required ? '' : '<small>nice to have</small>'}</span>`;
+function renderTailorResult() {
+  const r = tailorResult;
+  const { analysis } = r;
+  renderTailorScore();
+
+  // Why a skill counts (or doesn't count) toward the score
+  const tag = (m) => m.implied ? `via ${m.implied}`
+    : m.soft ? 'soft skill'
+    : m.note === 'alternative' ? 'alternative'
+    : m.note === 'example' ? 'example'
+    : m.required ? '' : 'nice to have';
+  const label = (m) => `${escapeHtml(m.name)}${tag(m) ? `<small>${escapeHtml(tag(m))}</small>` : ''}`;
+  const arg = (m) => escapeHtml(JSON.stringify(m.name));
   document.getElementById('tailor-matched').innerHTML = analysis.matched.length
-    ? analysis.matched.map(m => chip(m, 'hit')).join('')
+    ? analysis.matched.map(m => m.confirmed
+      ? `<button class="req-chip hit confirmed" onclick="toggleConfirmedSkill(${arg(m)})" title="You confirmed this skill. Click to remove it from the CV.">${label(m)}<span class="chip-x" aria-hidden="true">×</span></button>`
+      : `<span class="req-chip hit"${m.implied ? ` title="Your profile shows this through ${escapeHtml(m.implied)}"` : ''}>${label(m)}</span>`).join('')
     : '<span class="muted">None detected</span>';
   document.getElementById('tailor-missing').innerHTML = analysis.missing.length
-    ? analysis.missing.map(m => chip(m, 'gap')).join('')
+    ? analysis.missing.map(m => `<button class="req-chip gap" onclick="toggleConfirmedSkill(${arg(m)})" title="Add this skill to your CV if you really have it">${label(m)}<span class="chip-add">+ I have this</span></button>`).join('')
     : '<span class="muted">No gaps - you cover everything we detected.</span>';
   document.getElementById('tailor-gap-block').hidden = false;
 
   document.getElementById('tailor-changes').innerHTML = r.changes.map(c => `<li>${escapeHtml(c)}</li>`).join('');
+  renderTailorAiNote(r.ai || {});
 
   document.getElementById('tailor-analysis').hidden = false;
   document.getElementById('tailor-empty').hidden = true;
   document.getElementById('tailor-preview').hidden = false;
   document.getElementById('tailor-file').textContent = r.filename;
+  renderLayoutPicker();
+  // The tailored CV is now what Edit CV and the style toolbar work on
+  cveLoadTailored(r);
   renderTailorPreview();
+}
+
+// Says whether Claude rewrote this CV, and why not when it didn't
+function renderTailorAiNote(ai) {
+  const note = document.getElementById('tailor-ai-note');
+  let html = '';
+  let kind = 'info';
+  if (ai.used) {
+    html = '<strong>Rewritten by Claude</strong> for this job, using only facts from your profile and skills you confirmed.';
+    kind = 'ok';
+  } else if (ai.error) {
+    html = `<strong>Claude's rewrite isn't available:</strong> ${escapeHtml(ai.error)} Showing the rule-based CV. <button class="btn-link" onclick="runTailor()">Try again</button>`;
+    kind = 'warn';
+  } else if (ai.configured) {
+    html = 'Skills and score updated. <button class="btn-link" onclick="runTailor()">Rewrite with Claude</button> to update the wording too.';
+  } else {
+    html = 'Rule-based CV: your bullets are selected and reordered, not reworded. Add an Anthropic API key to the server to have Claude rewrite the CV for each job.';
+  }
+  note.className = `tailor-ai-note ${kind}`;
+  note.innerHTML = html;
+  note.hidden = false;
 }
 
 function renderTailorPreview() {
   if (!tailorResult) return;
   const frame = document.getElementById('tailor-frame');
   const highlight = document.getElementById('tailor-highlight').checked;
-  frame.srcdoc = cvDocument(tailorResult.html, cvTitle(), highlight);
+  frame.srcdoc = cvDocument(currentLayout().html, cvTitle(), highlight);
   frame.onload = () => {
     frame.style.height = `${frame.contentDocument.documentElement.scrollHeight}px`;
   };
@@ -144,12 +227,19 @@ function cvTitle() {
   return `${tailorResult.cv.name} - CV${company ? ` - ${company}` : ''}${title ? ` - ${title}` : ''}`;
 }
 
-function downloadTailoredPdf() {
+// Real PDF compiled from the chosen LaTeX layout (with your edits and styling)
+function downloadTailoredPdf(button) {
+  if (!tailorResult) return;
+  cveDownloadPdf(tailorWs, button, printTailoredPdf);
+}
+
+// Fallback: print the preview ("Save as PDF" in the print dialog)
+function printTailoredPdf() {
   if (!tailorResult) return;
   const frame = document.createElement('iframe');
   frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
   document.body.appendChild(frame);
-  frame.srcdoc = cvDocument(tailorResult.html, cvTitle(), false);
+  frame.srcdoc = cvDocument(currentLayout().html, cvTitle(), false);
   frame.onload = () => {
     // Let the web font settle before printing
     setTimeout(() => {
@@ -163,7 +253,7 @@ function downloadTailoredPdf() {
 
 function downloadTailoredTex() {
   if (!tailorResult) return;
-  const blob = new Blob([tailorResult.latex], { type: 'application/x-tex' });
+  const blob = new Blob([currentLayout().latex], { type: 'application/x-tex' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
   link.download = tailorResult.filename;
@@ -180,7 +270,8 @@ async function saveTailoredToProject() {
     const res = await fetch(apiUrl('/api/tailor'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, company, description: document.getElementById('tailor-desc').value, save: true })
+      // The exact CV on screen (latex + filename); title/description for the local dashboard server
+      body: JSON.stringify({ title, company, description: document.getElementById('tailor-desc').value, confirmedSkills: [...tailorConfirmed], save: true, latex: currentLayout().latex, filename: tailorResult.filename })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);

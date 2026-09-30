@@ -1,0 +1,226 @@
+// Claude rewrites the tailored CV for a specific job.
+//
+// The rule-based engine (tailor.js) first works out which requirements the candidate
+// covers and picks the most relevant content. Claude then rewrites the headline,
+// summary, skills and bullets so they read naturally and use the posting's wording,
+// using only facts from the profile and skills the candidate confirmed.
+//
+// Everything Claude returns is checked before it's used: every number must already be
+// in the profile, every skill must be in the profile or confirmed, and roles keep their
+// original titles, companies and dates. Anything that fails a check falls back to the
+// rule-based version, so a rewrite can never add facts the profile doesn't have.
+//
+// Needs ANTHROPIC_API_KEY. Without it (or if the call fails) the rule-based CV is used.
+
+import Anthropic from '@anthropic-ai/sdk';
+import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
+import { z } from 'zod';
+import { parseProfile, stripComments } from './tailor.js';
+
+export const AI_MODEL = 'claude-opus-5-5';
+const TIMEOUT_MS = 50_000;
+
+export const aiConfigured = Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+
+// Most recent role first; older roles keep fewer, sharper bullets
+const BULLETS_PER_ROLE = [8, 7, 6, 5, 4];
+const MAX_BULLET_WORDS = 40;
+const MAX_SUMMARY_WORDS = 110;
+
+const RewriteSchema = z.object({
+  headline: z.string().describe("The posting's job title, cleaned: no location, gender marker, reference number or 'remote'."),
+  tagline: z.array(z.string()).describe('6 to 8 of the most relevant skills the candidate has, most important first.'),
+  summary: z.string().describe('4 sentences, at most 100 words, no first-person pronouns, in the four-part pattern described.'),
+  skills: z.array(z.object({
+    group: z.string().describe('One of the standard category labels listed in the instructions.'),
+    items: z.array(z.string())
+  })).describe('4 to 7 skill groups, most relevant to the posting first.'),
+  experience: z.array(z.object({
+    index: z.number().int().describe('Position of the role in the EXPERIENCE INDEX list (0 = most recent).'),
+    bullets: z.array(z.string())
+  })).describe('One entry per role in the EXPERIENCE INDEX.'),
+  notes: z.array(z.string()).describe('3 to 6 short notes on what was changed for this posting.')
+});
+
+type Rewrite = z.infer<typeof RewriteSchema>;
+
+const SYSTEM_PROMPT = `You are an expert technical CV writer. You tailor a candidate's CV to one job posting so it is accurate, concise and matches the posting as closely as the candidate's real experience allows.
+
+Honesty rules (these override everything else):
+- Use only facts found in the candidate profile or in the confirmed skills list. Never invent employers, job titles, dates, projects, tools, responsibilities, team sizes or results.
+- Keep every number, percentage and metric exactly as the profile states it. Do not round, combine or add numbers.
+- A skill may appear in the CV only if the profile mentions it or it is in the confirmed skills list.
+- Skills listed under "Required skills the candidate does not have" must not appear anywhere in the CV.
+- When the posting names something the profile describes in other words (for example "Postgres" for "PostgreSQL", or "LLM evaluation" for work the profile describes as evals with LangSmith), you may use the posting's wording.
+
+Writing rules:
+- Headline: the posting's job title, cleaned of location, gender markers, reference numbers and "remote".
+- Summary: exactly this four-part pattern, at most 100 words, no first-person pronouns, no clichés ("results-driven", "passionate", "team player"):
+  1. "<Headline> with <N>+ years of experience building and deploying production <kind of systems>."
+  2. "Strong expertise in <the posting's key skills the candidate has, most important first>."
+  3. "Experienced across the full <AI product / data / delivery> lifecycle, including <stages the profile shows and the posting asks for>."
+  4. One sentence of proven results taken from the profile's own numbers.
+- Skills: use only these category labels, in this order, and only the ones that have relevant skills: Languages; Machine Learning; Generative AI and LLMs; AI Agents and Orchestration; RAG and Retrieval; LLM Training and Fine Tuning; Inference and Model Serving; MLOps and Evaluation; Backend and APIs; Frontend; Data Engineering; Cloud and Infrastructure; Monitoring and Observability; Testing; Databases; Design; Other Tools. Put the posting's required skills the candidate has first in each category. Leave out skills irrelevant to this posting and soft skills.
+- Bullets: rewrite the candidate's own bullets for each role, most relevant to the posting first. Start with a strong past-tense verb (present tense for a current role is fine), name the tools used, and end with the result when the profile states one. At most 30 words each. Most recent role: up to 8 bullets; next: 7; then 6; then 5; older roles: 4. Use fewer when the profile has fewer relevant facts; never pad.
+- The candidate's projects and education are kept exactly as the profile states them; do not add sections or content beyond what is asked for here.
+- Write in plain, specific language that reads naturally to a hiring manager and passes ATS keyword matching.`;
+
+function experienceIndex(profileMd: string): string {
+  const { experience } = parseProfile(profileMd);
+  return experience.map((x: { role: string; company: string; period: string }, i: number) => `${i}: ${x.role} - ${x.company} (${x.period})`).join('\n');
+}
+
+let client: Anthropic | null = null;
+function getClient(): Anthropic {
+  if (!client) client = new Anthropic({ timeout: TIMEOUT_MS, maxRetries: 1 });
+  return client;
+}
+
+async function requestRewrite(args: {
+  profileMd: string;
+  title: string;
+  company: string;
+  description: string;
+  confirmed: string[];
+  covered: string[];
+  implied: string[];
+  missing: string[];
+}): Promise<Rewrite> {
+  const user = `<job_posting>
+Title: ${args.title || '(not given)'}
+Company: ${args.company || '(not given)'}
+
+${args.description}
+</job_posting>
+
+<candidate_profile>
+${stripComments(args.profileMd).trim()}
+</candidate_profile>
+
+<confirmed_skills>
+${args.confirmed.length ? args.confirmed.join(', ') : '(none)'}
+</confirmed_skills>
+
+<experience_index>
+${experienceIndex(args.profileMd)}
+</experience_index>
+
+Required skills from the posting that the candidate has: ${args.covered.join(', ') || '(none detected)'}
+Skills the profile shows under another name (name them the way the posting does): ${args.implied.join('; ') || '(none)'}
+Required skills the candidate does not have (never claim these): ${args.missing.join(', ') || '(none)'}
+
+Tailor the CV for this posting.`;
+
+  const response = await getClient().beta.messages.parse({
+    model: AI_MODEL,
+    max_tokens: 16000,
+    // If Claude declines, Anthropic retries on its recommended fallback model
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default',
+    output_config: { effort: 'medium', format: betaZodOutputFormat(RewriteSchema) },
+    system: SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: user }]
+  });
+
+  if (response.stop_reason === 'refusal') throw new Error('Claude declined to rewrite this CV.');
+  if (response.stop_reason === 'max_tokens') throw new Error('The rewrite was cut short.');
+  if (!response.parsed_output) throw new Error('Claude returned an unexpected format.');
+  return response.parsed_output;
+}
+
+// ---------- Checks on Claude's output ----------
+
+const words = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
+const norm = (s: string) => s.toLowerCase().replace(/[\s\-_/.]+/g, ' ').trim();
+
+// Numbers as written ("99.95%", "100,000+", "2") reduced to their digits
+function numbersIn(text: string): string[] {
+  return (text.match(/\d[\d,]*(?:\.\d+)?/g) || []).map(n => n.replace(/,/g, ''));
+}
+
+type Cv = {
+  headline: string;
+  tagline: string[];
+  summary: string;
+  skills: { group: string; items: (string | { name: string; matched?: boolean })[] }[];
+  experience: { role: string; company: string; period: string; location: string; bullets: string[] }[];
+  [key: string]: unknown;
+};
+
+/**
+ * Applies Claude's rewrite to the rule-based CV, keeping only what passes the checks.
+ * Returns the merged CV and how many parts had to fall back.
+ */
+export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, allowedSkills: string[], blockedSkills: string[]) {
+  const profileText = norm(stripComments(profileMd));
+  const profileNumbers = new Set(numbersIn(stripComments(profileMd)));
+  const allowed = new Set(allowedSkills.map(norm));
+  // (names under 3 letters such as "Go" or "R" are skipped: they'd match ordinary words)
+  const blocked = blockedSkills.map(norm).filter(b => b.length >= 3);
+  let rejected = 0;
+
+  const numbersOk = (text: string) => numbersIn(text).every(n => profileNumbers.has(n) || Number(n) < 10);
+  const mentionsBlocked = (text: string) => blocked.some(b => new RegExp(`(?<![a-z0-9])${b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`).test(norm(text)));
+  const skillOk = (item: string) => {
+    const n = norm(item.replace(/\s*\(.*?\)\s*/g, ' '));
+    return Boolean(n) && !mentionsBlocked(item) && (allowed.has(n) || profileText.includes(n));
+  };
+
+  const headline = rewrite.headline.trim();
+  const out: Cv = { ...base };
+  if (headline && headline.length <= 80 && !mentionsBlocked(headline)) out.headline = headline;
+  else rejected++;
+
+  const tagline = rewrite.tagline.map(s => s.trim()).filter(skillOk).slice(0, 8);
+  if (tagline.length >= 4) out.tagline = tagline;
+  else rejected++;
+
+  const summary = rewrite.summary.trim();
+  if (summary && words(summary) <= MAX_SUMMARY_WORDS && numbersOk(summary) && !mentionsBlocked(summary)) out.summary = summary;
+  else rejected++;
+
+  const skills = rewrite.skills
+    .map(g => ({ group: g.group.trim(), items: [...new Set(g.items.map(s => s.trim()))].filter(skillOk) }))
+    .filter(g => g.group && g.items.length);
+  if (skills.reduce((n, g) => n + g.items.length, 0) >= 6) out.skills = skills;
+  else rejected++;
+
+  out.experience = base.experience.map((job, i) => {
+    const limit = BULLETS_PER_ROLE[i] ?? 2;
+    const fromClaude = rewrite.experience.find(e => e.index === i)?.bullets || [];
+    const good = fromClaude
+      .map(b => b.trim().replace(/^[-•*]\s*/, ''))
+      .filter(b => b && words(b) <= MAX_BULLET_WORDS && numbersOk(b) && !mentionsBlocked(b));
+    rejected += fromClaude.length - good.length;
+    return { ...job, bullets: (good.length ? good : job.bullets).slice(0, limit) };
+  });
+
+  return { cv: out, rejected };
+}
+
+/**
+ * Rewrites a rule-based tailoring result with Claude. Returns null when Claude isn't
+ * configured; throws when the call fails (the caller keeps the rule-based CV).
+ */
+export async function rewriteWithClaude(args: {
+  base: { cv: Cv; analysis: { matched: { name: string; required: boolean; implied?: string | null }[]; missing: { name: string; required: boolean }[] } };
+  profileMd: string;
+  title: string;
+  company: string;
+  description: string;
+  confirmed: string[];
+}) {
+  if (!aiConfigured) return null;
+  const { base, profileMd, title, company, description, confirmed } = args;
+
+  const profile = parseProfile(profileMd);
+  const profileSkills: string[] = profile.skills.flatMap((g: { items: string[] }) => g.items);
+  const covered = base.analysis.matched.filter(m => m.required).map(m => m.name);
+  const implied = base.analysis.matched.filter(m => m.implied).map(m => `${m.name} (shown by ${m.implied})`);
+  const missing = base.analysis.missing.map(m => m.name);
+
+  const rewrite = await requestRewrite({ profileMd, title, company, description, confirmed, covered, implied, missing });
+  const allowedSkills = [...profileSkills, ...confirmed, ...base.analysis.matched.map(m => m.name)];
+  const { cv, rejected } = mergeRewrite(base.cv, rewrite, profileMd, allowedSkills, missing);
+  return { cv, notes: rewrite.notes.slice(0, 6), rejected, model: AI_MODEL };
+}

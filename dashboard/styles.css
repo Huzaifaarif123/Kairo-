@@ -815,13 +815,12 @@ textarea.textarea-sm { min-height: 88px; }
 /* ---------- Search ---------- */
 .search-bar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px auto auto;
+  grid-template-columns: minmax(0, 1fr) 280px auto;
   gap: 8px;
   padding: 12px;
   margin-bottom: 16px;
 }
 
-.search-remote { padding: 0 6px; min-height: 40px; }
 
 .board-counts { color: var(--text-3); font-size: 12.5px; }
 
@@ -916,6 +915,12 @@ textarea.textarea-sm { min-height: 88px; }
 .job-title { font-weight: 600; font-size: 14.5px; line-height: 1.35; letter-spacing: -0.005em; }
 
 .job-company { color: var(--text-2); font-size: 13px; margin-top: 2px; }
+
+.tag-staffing {
+  color: color-mix(in srgb, var(--warn) 80%, var(--text));
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 25%, transparent);
+}
 
 .tag-source {
   color: var(--accent);
@@ -1693,10 +1698,8 @@ textarea.textarea-sm { min-height: 88px; }
 /* ---------- Responsive ---------- */
 @media (max-width: 1180px) {
   .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .search-bar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .search-bar { grid-template-columns: minmax(0, 1fr) auto; }
   .search-bar .input-icon { grid-column: 1 / -1; }
-  .search-bar .btn { grid-column: 1 / -1; }
-  .search-bar .search-remote { justify-self: start; }
 }
 
 @media (max-width: 1024px) {
