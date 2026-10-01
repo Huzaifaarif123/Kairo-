@@ -648,12 +648,25 @@ export function tailorCV({ title = '', company = '', description = '', confirmed
   // Experience: rank bullets by how many job requirements they evidence
   let dropped = 0, reordered = 0;
   const experience = profile.experience.map((job, i) => {
-    const scored = job.bullets.map((text, idx) => ({ text, idx, score: relevance(text) }));
-    const ranked = [...scored].sort((a, b) => b.score - a.score || a.idx - b.idx);
+    // A recruiter reads results before duties: a relevant bullet with a measured result
+    // (Google's XYZ) ranks above an equally relevant one without, and duty-style
+    // openers rank lower. Relevance still decides which bullets count as relevant.
+    const scored = job.bullets.map((text, idx) => {
+      const score = relevance(text);
+      const c = bulletChecks(text);
+      const rank = (score > 0 ? score + (c.y ? Math.max(2, score * 0.35) : 0) : (c.y ? 1 : 0)) + (c.z ? 0.5 : 0) - (c.x ? 0 : 2);
+      return { text, idx, score, rank, measured: c.y };
+    });
+    // Relevant bullets first, then by rank
+    const ranked = [...scored].sort((a, b) => Number(b.score > 0) - Number(a.score > 0) || b.rank - a.rank || b.score - a.score || a.idx - b.idx);
     const limit = BULLETS_PER_ROLE[i] ?? 2;
     const min = Math.min(MIN_BULLETS_PER_ROLE[i] ?? 2, limit);
     const relevant = ranked.filter(b => b.score > 0);
-    const kept = (relevant.length >= min ? relevant : ranked).slice(0, Math.max(min, Math.min(limit, relevant.length)));
+    let kept = (relevant.length >= min ? relevant : ranked).slice(0, Math.max(min, Math.min(limit, relevant.length)));
+    // Spare room: up to two more measured results, even when they name other tools
+    // ("achieving 90% test coverage"), after the relevant bullets
+    const extra = ranked.filter(b => b.score === 0 && b.measured && !kept.includes(b)).slice(0, Math.min(2, limit - kept.length));
+    kept = [...kept, ...extra];
     dropped += job.bullets.length - kept.length;
     if (kept.some((b, n) => b.idx !== n)) reordered++;
     return { ...job, bullets: kept };
@@ -1085,6 +1098,7 @@ export function polishBullet(text) {
 const UNITS = 'k|m|mm|bn|million|billion|thousand|hours?|hrs?|minutes?|mins?|seconds?|secs?|ms|days?|weeks?|months?|years?|users?|customers?|clients?|requests?|rps|qps|tps|transactions?|engineers?|developers?|people|members|services|microservices|countries|markets|teams?|projects?|apps?|applications?|pipelines?|models?|tb|gb|pb|records|rows|documents|pages|tickets|releases|deployments|sites|stores|integrations|endpoints|apis|features|products|partners|accounts|leads|downloads|installs|students|patients|merchants|orders|events|messages|calls|servers|nodes|clusters|repositories|tests|queries|jobs|workflows|dashboards|reports|countries|languages';
 const MEASURE = new RegExp(String.raw`\d+(?:\.\d+)?\s*(?:%|x\b|\+)|[$£€₹]\s?\d|\b\d{1,3}(?:,\d{3})+\b|\b\d+(?:\.\d+)?\s*(?:${UNITS})\b|`
   + String.raw`\b(?:doubled|tripled|quadrupled|halved)\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|hundreds?|thousands?|millions?|dozens?)\s+(?:of\s+)?(?:hours?|days?|weeks?|months?|minutes?|seconds?|years?|times|engineers?|developers?|teams?|people|clients?|customers?|users?|services|countries|markets|products|releases)\b|`
+  + String.raw`\b(?:twice|thrice|three times)\b|\b(?:daily|weekly|hourly|bi-?weekly)\s+(?:releases?|deploy\w*|shipping)\b|\b(?:zero|no|without)[\s-]downtime\b|`
   + String.raw`\b(?:team|group|squad|staff|cohort) of \d+\b|\b(?:top|over|under|within|than) \d+(?:\.\d+)?\b`, 'i');
 // A year ("in 2021") is not a result; "2000 users" is
 const YEAR_ONLY = new RegExp(String.raw`\b(?:19|20)\d{2}\b(?!\s*(?:\+|%|${UNITS})\b)`, 'gi');
@@ -1104,6 +1118,11 @@ function hasAction(rawText) {
   const base = w.endsWith('es') && GERUND_PAST[`${w.slice(0, -2)}ing`] ? w.slice(0, -2) : w.endsWith('s') ? w.slice(0, -1) : w;
   return Boolean(GERUND_PAST[`${base}ing`] || GERUND_PAST[`${base.slice(0, -1)}ing`] || GERUND_PAST[`${base}${base.slice(-1)}ing`]
     || PRESENT_VERBS.has(base));
+}
+
+/** One bullet against the XYZ formula: { x: action verb, y: measured result, z: method }. */
+export function bulletChecks(text) {
+  return { x: hasAction(text), y: hasMeasure(text), z: hasMethod(text) };
 }
 
 const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
@@ -1206,7 +1225,8 @@ export function reviewCV(cv, { title = '', description = '' } = {}, profile, mat
   const needYears = requiredYears(description);
   const years = yearsOfExperience((profile.experience || []).map(x => ({ ...x, period: String(x.period || '') })));
   const yearsFit = needYears ? Math.min(1, years / needYears) : 1;
-  const wanted = titleWords(cleanJobTitle(title));
+  // "Full Stack Engineer - AI Products": the role is before the dash; the rest names the team
+  const wanted = titleWords(cleanJobTitle(title).split(/\s+[-–—|:]\s+|\s*[(,]/)[0]);
   const held = new Set([profile.title, ...(profile.experience || []).map(x => x.role)].flatMap(titleWords));
   const titleFit = wanted.length ? wanted.filter(w => held.has(w)).length / wanted.length : 1;
   const evidenceFit = bullets.length ? Math.min(1, quantified / bullets.length / 0.6) : 0;
@@ -1224,7 +1244,7 @@ export function reviewCV(cv, { title = '', description = '' } = {}, profile, mat
 
   const flags = [];
   const flag = (severity, title, detail, fix) => flags.push({ severity, title, detail, fix });
-  if (!cv.email || !cv.phone) flag(cv.email ? 70 : 95, 'Missing contact details', `No ${[!cv.email && 'email', !cv.phone && 'phone number'].filter(Boolean).join(' or ')} in the header.`, `Add ${!cv.email && !cv.phone ? 'them' : 'it'} to the header, or the recruiter has no way to reach you.`);
+  if (!cv.email || !cv.phone) flag(cv.email ? 70 : 95, 'Missing contact details', `No ${[!cv.email && 'email', !cv.phone && 'phone number'].filter(Boolean).join(' or ')} in the header.`, `Add ${!cv.email && !cv.phone ? 'them' : 'it'} in Edit CV (or to the profile, for every CV), or the recruiter has no quick way to reach you.`);
   if (requiredMissing.length) flag(requiredMissing.length >= 3 ? 90 : 72, `Missing ${requiredMissing.length} required skill${requiredMissing.length > 1 ? 's' : ''}`,
     `The posting requires ${joinList(names(requiredMissing).slice(0, 5))}${requiredMissing.length > 5 ? ' and more' : ''}, and the CV doesn't show ${requiredMissing.length > 1 ? 'them' : 'it'}.`,
     'If you have one, click + I have this so it is added. If not, lead with the closest related experience.');
@@ -1281,7 +1301,7 @@ export function reviewCV(cv, { title = '', description = '' } = {}, profile, mat
   const sections = [];
   const verdict = (section, v, reason, fix = '') => sections.push({ section, verdict: v, reason, fix });
   if (!cv.name || !cv.email) verdict('Header', 'reject', `The ATS can't read ${[!cv.name && 'a name', !cv.email && 'an email'].filter(Boolean).join(' or ')}.`, 'Add your name, email and phone as plain text at the top.');
-  else if (!cv.phone) verdict('Header', 'skim', 'No phone number; recruiters usually call first.', 'Add a phone number to the header.');
+  else if (!cv.phone) verdict('Header', 'skim', 'No phone number; recruiters usually call first.', 'Add a phone number in Edit CV, or to the profile so every CV has it.');
   else verdict('Header', 'read', `Name, headline "${cv.headline || '-'}" and contact details are clear.`, cv.linkedin ? '' : 'Add your LinkedIn URL.');
   const summaryWords = words(cv.summary || '');
   const inSummary = named(cv.summary || '', required);
@@ -1330,7 +1350,11 @@ export function reviewCV(cv, { title = '', description = '' } = {}, profile, mat
   }
   else verdict('Education', 'skim', needLevel && haveLevel >= needLevel ? `${levelName[haveLevel][0].toUpperCase()}${levelName[haveLevel].slice(1)} meets the posting's degree requirement.` : 'Checked only for a degree and school.');
   if (hidden.includes('certifications')) verdict('Certifications', 'skip', 'Hidden in this layout.');
-  else if (cv.certifications.length) verdict('Certifications', 'skim', `${cv.certifications.length} listed; read only if they match the stack.`);
+  else if (cv.certifications.length) {
+    const relevantCerts = cv.certifications.filter(c => named(c, matched).length);
+    if (relevantCerts.length) verdict('Certifications', 'read', `${relevantCerts.length} of ${cv.certifications.length} match this job's stack.`);
+    else verdict('Certifications', 'skim', `${cv.certifications.length} listed; none name this job's skills.`, 'List the certifications that match this job first.');
+  }
 
   return {
     recruiter: { score: finalScore, parts, missingKeywords, redFlags: flags.slice(0, 3).map(({ severity, ...f }) => f), moreFlags: Math.max(0, flags.length - 3) },
