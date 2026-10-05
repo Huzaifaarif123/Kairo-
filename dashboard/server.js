@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { tailorCV, saveTailoredCV, renderTailoredCV, profileToCV } from './tailor.js';
+import { tailorCV, saveTailoredCV, renderTailoredCV, profileToCV, applyInstructions } from './tailor.js';
+import { applyWithLocalModel, localModelReady } from './local-llm.js';
 import { compileLatexWithRetry, LatexCompileError } from './latex-compile.js';
 import { resolveProfile, listProfiles, profileDetails, usesOriginalOwner, readProfileMarkdown, writeProfileMarkdown, evaluateAgainstProfile } from './profiles.js';
 
@@ -242,6 +243,29 @@ const server = http.createServer(async (req, res) => {
     const ok = cv.name || cv.experience.length;
     res.writeHead(ok ? 200 : 422, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(ok ? renderTailoredCV(cv, {}, '') : { error: `The ${profile.label} profile is still empty. Fill it in first, or start from a blank CV.` }));
+    return;
+  }
+
+  // "Tell it what to add or change": plain instructions applied to the CV being edited
+  if (pathname === '/api/cv/instruct' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; if (body.length > 300000) req.destroy(); });
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body || '{}');
+        if (!data.cv || typeof data.cv !== 'object') throw Object.assign(new Error('Tailor a CV first.'), { status: 400 });
+        const text = String(data.text || '').slice(0, 4000);
+        if (!text.trim()) throw Object.assign(new Error('Write what you want to add or change.'), { status: 400 });
+        const result = applyInstructions(data.cv, text);
+        const local = result.pending.length > 0 && await localModelReady();
+        if (local) await applyWithLocalModel(result);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ...result, ai: local }));
+      } catch (err) {
+        res.writeHead(err.status || 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
     return;
   }
 

@@ -515,3 +515,42 @@ button.req-chip:focus-visible { outline: 2px solid var(--accent, #4f46e5); outli
 .verdict { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 999px; margin-top: 1px; }
 .review-ok { font-size: 12.5px; color: var(--text-2); margin: 0; }
 .review-list + .review-ok { margin-top: 8px; }
+
+/* "Tell it what to add or change" */
+.instruct-card .card-title { margin-bottom: 10px; }
+.instruct-label { display: block; margin: 0 0 6px; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+.instruct-box { width: 100%; box-sizing: border-box; height: auto; min-height: 96px; resize: vertical; font: inherit; font-size: 13px; line-height: 1.5; padding: 9px 12px; }
+.instruct-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.instruct-result:empty { display: none; }
+.instruct-result { margin-top: 10px; font-size: 12.5px; line-height: 1.45; }
+.instruct-done { margin: 0; padding-left: 18px; color: var(--text-2); }
+.instruct-done li { overflow-wrap: anywhere; }
+.instruct-done li::marker { color: var(--ok); }
+.instruct-unclear { margin-top: 6px; padding: 8px 10px; border-radius: var(--radius-sm); color: color-mix(in srgb, var(--warn) 85%, var(--text)); background: color-mix(in srgb, var(--warn) 10%, transparent); overflow-wrap: anywhere; }
+.instruct-help { margin-top: 12px; font-size: 12.5px; color: var(--text-2); }
+.instruct-help summary { cursor: pointer; font-weight: 600; }
+.instruct-help ul { margin: 8px 0; padding-left: 18px; display: grid; gap: 4px; }
+.instruct-help code { font-family: var(--mono); font-size: 11.5px; padding: 1px 4px; border-radius: 4px; background: var(--surface-3); overflow-wrap: anywhere; }
+.instruct-help p { margin: 0; }
+.label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+/* Suggestions next to the text box */
+.cv-tips-box { margin: 0 0 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
+.cv-tips-title { margin: 0 0 8px; font-size: 12.5px; font-weight: 600; color: var(--text); }
+.cv-tips-title span { margin-left: 4px; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.cv-tips { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.cv-tip { display: grid; gap: 3px; width: 100%; text-align: left; font: inherit; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }
+.cv-tip:hover:not([disabled]) { border-color: var(--accent-ring); }
+.cv-tip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cv-tip[disabled] { cursor: default; }
+.cv-tip-text { font-size: 12.5px; line-height: 1.45; }
+.cv-tip-line { font-family: var(--mono); font-size: 11px; color: var(--text-3); overflow-wrap: anywhere; }
+.cv-tips-ok, .cv-tips-more { margin: 0; font-size: 12.5px; color: var(--text-2); }
+.cv-tips-more { margin-top: 8px; }
+.instruct-help li { line-height: 1.9; }
+.ex-plus { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin: 0 2px 0 4px; padding: 0; vertical-align: middle; border-radius: 50%; border: 1px solid var(--accent-ring); background: var(--accent-soft); color: var(--accent); font: 600 13px/1 var(--font); cursor: pointer; }
+.ex-plus:hover { background: var(--accent); color: var(--on-accent); }
+.ex-plus:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.instruct-answer { margin-top: 6px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border); }
+.instruct-answer strong:first-child { display: block; font-size: 12px; color: var(--text-2); }
+.instruct-answer p { margin: 4px 0 0; color: var(--text); line-height: 1.5; overflow-wrap: anywhere; }
+.instruct-wait { margin: 0; font-size: 12.5px; color: var(--text-2); }

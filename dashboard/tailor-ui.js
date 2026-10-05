@@ -62,7 +62,7 @@ function useTailorCv(cv, from) {
   tailorSource = { kind: 'other', name: cv.name, markdown: buildProfileMarkdown(cv, null), label: from };
   const skills = cv.skills.reduce((n, g) => n + g.items.length, 0);
   document.getElementById('tailor-cv-status').innerHTML =
-    `Using <strong>${escapeHtml(cv.name)}</strong>'s CV (from ${escapeHtml(from)}): ${cv.experience.length} role${cv.experience.length === 1 ? '' : 's'}, ${skills} skills${cv.projects.length ? `, ${cv.projects.length} projects` : ''}. Not saved to any profile.`;
+    `Using <strong>${escapeHtml(cv.name)}</strong>'s CV (from ${escapeHtml(from)}): ${cv.experience.length} role${cv.experience.length === 1 ? '' : 's'}, ${skills} skill${skills === 1 ? '' : 's'}${cv.projects.length ? `, ${cv.projects.length} project${cv.projects.length === 1 ? '' : 's'}` : ''}. Not saved to any profile.`;
   tailorConfirmed.clear();
   tailorJobKey = '';
   resetTailor();
@@ -268,12 +268,9 @@ function renderTailorReview() {
     <ul class="review-list review-skim">${skim.sections.map(s => `<li><span class="verdict ${s.verdict}">${escapeHtml(s.verdict)}</span><span><strong>${escapeHtml(s.section)}</strong>: ${escapeHtml(s.reason)}${s.fix ? `<span class="review-fix">${escapeHtml(s.fix)}</span>` : ''}</span></li>`).join('')}</ul>`;
 }
 
-function renderTailorResult() {
-  const r = tailorResult;
-  const { analysis } = r;
-  renderTailorScore();
-  renderTailorReview();
-
+// The "Covered in your CV" and "Not in your profile" chips
+function renderTailorChips() {
+  const { analysis } = tailorResult;
   // Why a skill counts (or doesn't count) toward the score
   const tag = (m) => m.implied ? `via ${m.implied}`
     : m.soft ? 'soft skill'
@@ -291,6 +288,13 @@ function renderTailorResult() {
     ? analysis.missing.map(m => `<button class="req-chip gap" onclick="toggleConfirmedSkill(${arg(m)})" title="Add this skill to your CV if you really have it">${label(m)}<span class="chip-add">+ I have this</span></button>`).join('')
     : '<span class="muted">No gaps - you cover everything we detected.</span>';
   document.getElementById('tailor-gap-block').hidden = false;
+}
+
+function renderTailorResult() {
+  const r = tailorResult;
+  renderTailorScore();
+  renderTailorReview();
+  renderTailorChips();
 
   document.getElementById('tailor-changes').innerHTML = r.changes.map(c => `<li>${escapeHtml(c)}</li>`).join('');
   renderTailorAiNote(r.ai || {});

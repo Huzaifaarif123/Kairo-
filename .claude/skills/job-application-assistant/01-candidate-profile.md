@@ -4,89 +4,80 @@ framework_version: 1.1.1
 
 # Candidate Profile
 
+<!-- Imported from a CV. Check every section, fix anything that was read wrongly, then click Save profile. -->
+
 ## Identity
-- **Name:** Hassaan Nasir
-- **Location:** Pakistan / UAE (Open to Worldwide Remote, Relocation, and Hybrid)
-- **Phone:** Available upon request
-- **Email:** hasaan.engineer1@gmail.com
-- **LinkedIn:** https://linkedin.com/in/hassaan713-nasir
-- **GitHub:** Available on profile
-- **Status:** Actively exploring Senior Full Stack, Senior Backend, and AI Engineering roles
-- **Constraints:** Open to Remote worldwide, UAE on-site/hybrid, or relocation for sponsored roles
+- **Name:** Amir Sharif
+- **Title:** Senior Full Stack AI Engineer
+- **Location:** Lahore, Pakistan
+- **Email:** amirsharif5687@gmail.com
+- **LinkedIn:** https://linkedin.com/in/amir-sharif5687
+- **GitHub:** https://github.com/remotecraftr
+- **Status:**
 
 ### Languages
 | Language | Level | Notes |
 |----------|-------|-------|
-| English | Fluent / Professional Working Proficiency | Primary working language across global teams |
-| Urdu | Native | Fluent |
+
+## Summary
+Engineer with 7+ years who takes AI products from idea to running system without a handoff at every layer. I build the agent and retrieval logic, the backend services that carry it, the frontend where it surfaces, and the cloud platform underneath. Recent work spans LangGraph agent systems, RAG across knowledge bases of 100,000+ records, document pipelines processing 15,000+ files a month, and AWS platforms running 25+ backend services at 99.95% availability. Earlier years in large-scale data engineering, with pipelines moving 100+ GB a day. Best suited to teams that would otherwise need an AI engineer, a backend engineer and a platform engineer to ship one product.
 
 ## Education
 
 | Degree | Period | Institution | Key Topics |
 |--------|--------|-------------|------------|
-| Bachelor of Computer Science | 2014 - 2018 | National University of Computer and Emerging Sciences (FAST-NUCES), Lahore | Distributed Systems, Algorithms, Database Engineering, Software Architecture |
+| Bachelor of Science, Computer Science |  | National University of Computer and Emerging Sciences (FAST-NUCES) | |
 
 ## Professional Experience
 
-### Senior Full Stack Engineer - Tags Solutions (2024 – 2026)
-United Arab Emirates / Remote
-- Architected scalable backend services using Python, Django REST Framework, and PostgreSQL, delivering secure REST APIs that supported multiple business-critical applications while improving API response times by 38%.
-- Designed asynchronous processing pipelines with Celery and Redis, automating long-running background workloads and reducing task completion times by 55%.
-- Developed high-performance user interfaces with React, Next.js, and TypeScript, optimizing rendering strategies and bundle sizes to improve Core Web Vitals and reduce page load times by 34%.
-- Optimized PostgreSQL schemas, indexing strategies, and complex ORM queries, lowering database latency by 47% across high-traffic services.
-- Implemented comprehensive observability using Sentry, Grafana, Datadog, and Prometheus, enabling proactive monitoring that reduced production incident resolution time by 42%.
-- Integrated AI-powered developer workflows using Claude Code, Cursor AI, and OpenAI APIs to accelerate feature development, automate code generation, and improve engineering productivity.
-- Managed containerized deployments with Docker, Kubernetes, GitLab CI/CD, and AWS, enabling reliable automated releases with minimal downtime.
+### Senior Full Stack AI Engineer - Independent Contractor (2024 – Present)
+Remote
+- Architected LangGraph agent systems with checkpointing, persisted state and human approval gates, covering 10+ workflow states with execution that resumes rather than restarts.
+- Built vision-language document pipelines on OpenAI models, OCR and PyMuPDF that process 15,000+ documents a month and removed 30+ hours of weekly manual review.
+- Delivered 10+ production integrations across enterprise APIs and third-party systems, with field-level transformation, schema validation, retry logic and audit trails.
+- Implemented RBAC, data de-identification and encrypted data flows for workflows operating under regulatory compliance requirements.
+- Instrumented agents with LangSmith, Arize Phoenix and OpenTelemetry, surfacing tool failures, hallucination patterns and workflow-level errors that were previously invisible.
+- Shipped AI web applications to 50,000+ users across client platforms, with async FastAPI services that took 40% off response latency.
+- Took an AWS production platform for 25+ backend services from 99.5% to 99.95% availability through capacity planning, health checks and automated recovery.
+- Wrote reusable Terraform modules for multi-environment AWS deployments, cutting provisioning from two days to under three hours.
+- Rebuilt Nginx and ALB routing around health-based traffic distribution and safer rollout patterns, reducing deployment- related interruptions by 40%.
 
-### Full Stack Engineer - Inovaqo (2023 – 2024)
-Pakistan / Remote
-- Led the architecture and development of distributed backend systems using Python, Django, DRF, Celery, and PostgreSQL, supporting high-volume data processing and scalable microservice communication.
-- Engineered reusable backend modules, authentication systems, and shared APIs adopted across multiple engineering teams, reducing duplicate development effort.
-- Built responsive frontend features with React, Next.js, and TypeScript, collaborating closely with product designers to deliver performant user experiences.
-- Improved database efficiency through advanced query optimization, indexing, and schema refactoring, significantly reducing response times for complex analytical workloads.
-- Implemented centralized logging, tracing, and application monitoring using Sentry, Grafana, Datadog, and OpenTelemetry, improving production visibility and operational reliability.
-- Mentored engineers through architecture discussions, pull request reviews, and coding standards, helping maintain consistent engineering quality across projects.
-- Automated deployment pipelines with GitLab CI/CD, Docker, Kubernetes, and AWS, increasing deployment frequency while maintaining stable production releases.
+### Senior Full Stack Engineer - Adology.ai (2022 – 2024)
+United States, IL (remote)
+- Led development of the AI-driven ad optimization layer, lifting measured campaign ROI by 28%.
+- Built the RAG retrieval stack on Pinecone, FAISS and pgvector, indexing 100,000+ creative and knowledge records for context-aware querying.
+- Developed MCP servers and typed tool schemas connecting agents to internal databases and APIs, producing 20+ reusable tools with authentication and permission boundaries.
+- Built ML pipelines for audience targeting and performance prediction.
+- Developed Django APIs sustaining 1M+ requests a day, tuned with Redis caching, and React dashboards for real-time analytics.
+- Cut PostgreSQL report generation time by roughly 70% through query optimization.
+- Automated delivery with Docker and GitHub Actions, reducing release effort 30%, and added Prometheus and Grafana dashboards plus SAST and dependency scanning in CI.
 
-### Senior Software Engineer - Turing (2021 – 2023)
-Remote / Pakistan
-- Built scalable chat and collaboration systems using Python, React.js, TypeScript, and PostgreSQL, supporting 10,000+ concurrent users.
-- Designed reusable frontend systems and plugin architectures for real-time data visualization and analytics workflows.
-- Implemented automated testing workflows using Jest, Vitest, and Cypress, achieving 90% test coverage and reducing production bugs.
-- Streamlined CI/CD pipelines using Docker and GitHub Actions, enabling twice-weekly releases without downtime.
+### Senior Software Engineer - Emergent Data (2020 – 2022)
+United States, CA (remote)
+- Designed data pipelines processing 100+ GB a day for client analytics and ML workloads.
+- Built batch and distributed ETL and ELT workflows on Apache Spark, Airflow and Flask.
+- Ran AWS and Snowflake data platforms, cutting query costs 30% through warehousing design and performance tuning.
+- Implemented Kafka streaming pipelines for near real-time data.
+- Delivered ML-ready datasets alongside data science teams and supported production deployment and monitoring of image models.
 
-### Software Engineer - Devsinc (2018 – 2020)
-Pakistan
-- Developed responsive UI components using React.js, TypeScript, Tailwind CSS, HTML5, and CSS3 with strong attention to UX and accessibility.
-- Implemented client-side state management using Redux, Zustand, and Context API, improving user session stability and frontend responsiveness.
-- Optimized frontend performance through code splitting, lazy loading, and Lighthouse-driven optimization techniques.
-- Wrote unit and integration tests using Jest and React Testing Library to ensure reliable feature delivery.
+### Full Stack Engineer - Programmers Force (2019 – 2020)
+Lahore, Pakistan
+- Built Django and React applications serving 10,000+ users, with secure REST APIs and authentication systems.
+- Halved frontend load times through performance optimization.
+- Optimized PostgreSQL schemas and migrations, and containerized applications with Docker for reliable deployments.
 
 ## Independent Projects
-- **Maya AI**: AI automation platform providing customizable agents for lead conversion, customer support, scheduling, and workflow execution. Integrated LLMs, CRMs, and messaging APIs, operating 24/7 as a managed or self-hosted solution.
-- **Emergent Data AI**: Applications of data science, artificial intelligence, and machine learning exploring innovative agentic architectures.
-- **Kordis**: Financial management platform providing services from financial statement preparation and cash flow management to M&A/capital raise prep.
-- **Nebula x Gaming**: High-performance gaming tournament and competitive play platform.
+- **GetOnCall AI**: Healthcare platform turning physician and patient calls into clinical notes and billing documentation, integrated with EHR systems. Built the voice AI workflow and the integration layer.
+- **ByMaya.ai**: AI personal assistant and productivity platform. Built the LLM workflows, backend services and AI integrations.
+- **VoiceGlow**: Conversational voice and chat platform. Built core AI workflows, backend services and production integrations.
+- **CKAN (open source)**: Contributed backend features, API customization and data publishing workflow support.
 
 ## Technical Skills
 
-### Programming & ML
-- **Python 3** (Expert): Django, Django REST Framework, FastAPI, Celery, PyTest, Pydantic, SQLAlchemy
-- **TypeScript & JavaScript** (Expert): React.js, Next.js, Node.js, Express.js, Redux Toolkit, Zustand
-- **AI & LLMs** (Advanced): LangChain, LangGraph, OpenAI API, Anthropic Claude API, Claude Code, Cursor AI, MCP (Model Context Protocol), Prompt Engineering, Agentic Workflows
-
-### Databases & Storage
-- **PostgreSQL**, ClickHouse, Elasticsearch, Redis, MongoDB, MySQL, SQLite, pgvector, Amazon RDS
-
-### Cloud & DevOps
-- **Docker**, Kubernetes, AWS (EC2, ECS, S3, RDS, CloudWatch), GitLab CI/CD, GitHub Actions, Linux, Nginx, Terraform, Vercel
-
-### Observability & Monitoring
-- **Sentry**, Datadog, Grafana, Prometheus, OpenTelemetry, ELK Stack
+### From CV
+- **AI and LLM engineering**: LangGraph, LangChain, LlamaIndex, OpenAI API, Anthropic Claude, RAG, agentic workflows, tool calling, MCP, prompt engineering, embeddings, document intelligence, PyTorch, Hugging Face Transformers
+- **Retrieval, data and ML ops**: Pinecone, FAISS, pgvector, vector search, Apache Spark, Airflow, Kafka, Snowflake, ETL and ELT, feature stores, MLflow, LangSmith, Arize Phoenix, OpenTelemetry
+- **Backend and application**: Python, FastAPI, Django, Flask, Node.js, TypeScript, REST, GraphQL, microservices, PostgreSQL, Redis, MongoDB, React, Next.js
+- **Cloud, infrastructure and reliability**: AWS (Lambda, EC2, S3, RDS, ALB, IAM, CloudWatch), Terraform, Docker, Kubernetes, ECS, GitHub Actions, GitLab CI, Nginx, Linux, Prometheus, Grafana, incident response, high availability
 
 ## Certifications
-- **Introduction to Model Context Protocol** - Anthropic
-- **Claude Code in Action** - Anthropic
-
-## References
-- Available upon request.

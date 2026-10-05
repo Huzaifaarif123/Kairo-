@@ -357,7 +357,11 @@ Requirements:
                 </div>
               </div>
               <div class="field">
-                <label for="tailor-desc">Job description</label>
+                <div class="label-row">
+                  <label for="tailor-desc">Job description</label>
+                  <input type="file" id="tailor-jd-file" accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" hidden onchange="handleTailorJdFile(this)">
+                  <button type="button" class="btn-link" onclick="document.getElementById('tailor-jd-file').click()">Upload JD (PDF, Word or text)</button>
+                </div>
                 <textarea id="tailor-desc" class="input" placeholder="Paste the full job description, including requirements…"></textarea>
               </div>
               <button class="btn btn-primary btn-block" id="tailor-run" onclick="runTailor()">Tailor my CV</button>
@@ -459,6 +463,30 @@ Requirements:
                 </div>
               </div>
               <div class="card cv-style-bar" id="tailor-style-bar" role="toolbar" aria-label="CV styling" hidden></div>
+              <div class="card instruct-card" id="tailor-instruct-card">
+                <h2 class="card-title">Tell it what to add or change</h2>
+                <div class="cv-tips-box" id="tailor-instruct-tips" aria-live="polite"></div>
+                <label class="instruct-label" for="tailor-instruct">Write what you want and press Enter (Shift+Enter for a new line)</label>
+                <textarea id="tailor-instruct" class="input instruct-box" rows="4" maxlength="4000" onkeydown="instructKey(event)" placeholder="Under Brightloop add: built GraphQL APIs serving 2M requests a day&#10;Add skills: Kubernetes, Terraform&#10;Remove PHP"></textarea>
+                <div class="instruct-actions">
+                  <button class="btn btn-primary" id="tailor-instruct-apply" onclick="applyInstruct(this)">Apply to CV</button>
+                  <button class="btn btn-secondary" id="tailor-instruct-undo" onclick="undoInstruct()" disabled>Undo last change</button>
+                </div>
+                <div class="instruct-result" id="tailor-instruct-result" role="status"></div>
+                <details class="instruct-help">
+                  <summary>What can I write?</summary>
+                  <ul>
+                    <li><code>Under Brightloop add: …</code><button type="button" class="ex-plus" data-text="Under {job} add: " onclick="addInstructExample(this)" aria-label="Add this to the box" title="Add this to the box">+</button> or <code>Add a point: …</code><button type="button" class="ex-plus" data-text="Add a point: " onclick="addInstructExample(this)" aria-label="Add this to the box" title="Add this to the box">+</button> adds a point (to that job, or your latest one)</li>
+                    <li><code>At Paywise I migrated our services to Docker…</code><button type="button" class="ex-plus" data-text="At {job} I " onclick="addInstructExample(this)" aria-label="Add this to the box" title="Add this to the box">+</button> also adds a point to that job</li>
+                    <li><code>Add skills: Kubernetes, Terraform</code><button type="button" class="ex-plus" data-text="Add skills: " onclick="addInstructExample(this)" aria-label="Add this to the box" title="Add this to the box">+</button> / <code>Remove PHP</code><button type="button" class="ex-plus" data-text="Remove " onclick="addInstructExample(this)" aria-label="Add this to the box" title="Add this to the box">+</button></li>
+                    <li><code>Remove the point about payment flows</code><button type="button" class="ex-plus" data-text="Remove the point about " onclick="addInstructExample(this)" aria-label="Add this to the box" title="Add this to the box">+</button> / <code>Remove projects</code><button type="button" class="ex-plus" data-text="Remove projects" onclick="addInstructExample(this)" aria-label="Add this to the box" title="Add this to the box">+</button></li>
+                    <li><code>Replace "40,000 users" with "45,000 monthly users"</code><button type="button" class="ex-plus" data-text="Replace &quot;old words&quot; with &quot;new words&quot;" data-select="old words" onclick="addInstructExample(this)" aria-label="Add this to the box" title="Add this to the box">+</button></li>
+                    <li><code>Change headline to …</code><button type="button" class="ex-plus" data-text="Change headline to " onclick="addInstructExample(this)" aria-label="Add this to the box" title="Add this to the box">+</button> / <code>Add to summary: …</code><button type="button" class="ex-plus" data-text="Add to summary: " onclick="addInstructExample(this)" aria-label="Add this to the box" title="Add this to the box">+</button> / <code>Set phone to …</code><button type="button" class="ex-plus" data-text="Set phone to " onclick="addInstructExample(this)" aria-label="Add this to the box" title="Add this to the box">+</button></li>
+                    <li><code>Add certification: …</code><button type="button" class="ex-plus" data-text="Add certification: " onclick="addInstructExample(this)" aria-label="Add this to the box" title="Add this to the box">+</button> / <code>Add degree: BSc Computer Science, University, 2016</code><button type="button" class="ex-plus" data-text="Add degree: Degree, University, Year" data-select="Degree, University, Year" onclick="addInstructExample(this)" aria-label="Add this to the box" title="Add this to the box">+</button></li>
+                  </ul>
+                  <p>Click <strong>+</strong> to put an example in the box, finish it, then click <strong>Apply to CV</strong>. Only what you write is added. Points you add are cleaned up (first person removed, tools spelled properly), never invented.</p>
+                </details>
+              </div>
               <div class="paper">
                 <iframe id="tailor-frame" title="Tailored CV preview"></iframe>
               </div>
@@ -724,6 +752,7 @@ Requirements:
   <script src="app.js"></script>
   <script src="tailor-ui.js"></script>
   <script src="cv-editor.js"></script>
+  <script src="cv-instruct.js"></script>
   <script src="profiles-ui.js"></script>
   <script src="cv-import.js"></script>
 </body>

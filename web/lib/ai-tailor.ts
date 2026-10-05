@@ -57,12 +57,13 @@ Writing rules:
 - Headline: the posting's job title, cleaned of location, gender markers, reference numbers and "remote".
 - Summary: exactly this four-part pattern, at most 100 words, no first-person pronouns, no clichés ("results-driven", "passionate", "team player"):
   1. "<Headline> with <N>+ years of experience building and deploying production <kind of systems>."
-  2. "Strong expertise in <the posting's key skills the candidate has, most important first>."
+  2. "Strong expertise across <the posting's key skills the candidate has, grouped by where they are used, e.g. "React and Next.js on the frontend; Python and Django on the backend; and AWS and Docker for cloud delivery">." Never a bare keyword list."
   3. "Experienced across the full <AI product / data / delivery> lifecycle, including <stages the profile shows and the posting asks for>."
   4. One sentence of proven results taken from the profile's own numbers.
 - Skills: use only these category labels, in this order, and only the ones that have relevant skills: Languages; Machine Learning; Generative AI and LLMs; AI Agents and Orchestration; RAG and Retrieval; LLM Training and Fine Tuning; Inference and Model Serving; MLOps and Evaluation; Backend and APIs; Frontend; Data Engineering; Cloud and Infrastructure; Monitoring and Observability; Testing; Databases; Design; Other Tools. Put the posting's required skills the candidate has first in each category. Leave out skills irrelevant to this posting and soft skills.
-- Bullets: rewrite the candidate's own bullets for each role, most relevant to the posting first. Follow Google's XYZ formula: "Accomplished [X] as measured by [Y], by doing [Z]": the outcome (X), the profile's own number for it (Y) and the tools or method used (Z). Start with a strong past-tense verb (present tense for a current role is fine); never start with "Responsible for", "Worked on", "Helped" or "Involved in". Work the posting's keywords in naturally where the profile supports them. When the profile states no number for a bullet, keep X and Z and do not make one up. At most 30 words each. Most recent role: up to 8 bullets; next: 7; then 6; then 5; older roles: 4. Use fewer when the profile has fewer relevant facts; never pad.
+- Bullets: rewrite the candidate's own bullets for each role, most relevant to the posting first. Follow Google's XYZ formula: "Accomplished [X] as measured by [Y], by doing [Z]": the outcome (X), the profile's own number for it (Y) and the tools or method used (Z). Start with a strong past-tense verb (present tense for a current role is fine); never start with "Responsible for", "Worked on", "Helped" or "Involved in". Work the posting's keywords in naturally where the profile supports them. When the profile states no number for a bullet, keep X and Z and do not make one up. At most 30 words each. Every role gets at least 5 bullets when the profile has that many facts for it (most recent role up to 8; next 7; then 6). When a role has fewer facts, split bullets that hold two achievements, but never pad with invented ones.
 - The candidate's projects and education are kept exactly as the profile states them; do not add sections or content beyond what is asked for here.
+- Tailor the content, don't stuff keywords: make each bullet answer something the posting asks for, using the profile's own facts. Use the posting's wording only where the profile shows that skill, and never add a skill to a bullet that the profile doesn't tie to that work.
 - Write in plain, specific language that reads naturally to a hiring manager and passes ATS keyword matching.`;
 
 function experienceIndex(profileMd: string): string {
@@ -223,4 +224,62 @@ export async function rewriteWithClaude(args: {
   const allowedSkills = [...profileSkills, ...confirmed, ...base.analysis.matched.map(m => m.name)];
   const { cv, rejected } = mergeRewrite(base.cv, rewrite, profileMd, allowedSkills, missing);
   return { cv, notes: rewrite.notes.slice(0, 6), rejected, model: AI_MODEL };
+}
+
+// ---------- "Tell it what to add or change": anything the rules didn't understand ----------
+
+const EditSchema = z.object({
+  cv: z.object({
+    name: z.string(),
+    headline: z.string(),
+    summary: z.string(),
+    email: z.string(),
+    phone: z.string(),
+    location: z.string(),
+    linkedin: z.string(),
+    github: z.string(),
+    skills: z.array(z.object({ group: z.string(), items: z.array(z.string()) })),
+    experience: z.array(z.object({ role: z.string(), company: z.string(), period: z.string(), location: z.string(), bullets: z.array(z.string()) })),
+    projects: z.array(z.object({ name: z.string(), bullets: z.array(z.string()), tech: z.array(z.string()) })),
+    education: z.array(z.object({ degree: z.string(), school: z.string(), period: z.string() })),
+    certifications: z.array(z.string())
+  }),
+  changes: z.array(z.string()),
+  notDone: z.array(z.string())
+});
+
+const EDIT_PROMPT = `You edit a CV exactly as its owner asks. You receive the CV as JSON and their requests.
+- Make every requested change, and nothing else: every field you weren't asked to change stays exactly as it is.
+- Never add an employer, job title, degree, school or certification the owner didn't name in their request.
+- When asked for achievements, results or numbers, rewrite the relevant points with realistic, modest figures for that kind of work and mark each estimate with "~" (e.g. "~30%").
+- Points start with a strong past-tense verb, follow "did X, measured by Y, by doing Z", and stay under 30 words. No first person.
+- Return the whole CV, a short plain-English list of what you changed, and any request you couldn't do (with why).`;
+
+type EditableCv = z.infer<typeof EditSchema>['cv'];
+
+/** Claude applies requests the rules didn't understand. Returns null if its answer fails the checks. */
+export async function editCvWithClaude(cv: EditableCv & Record<string, unknown>, requests: string[]) {
+  const response = await getClient().beta.messages.parse({
+    model: AI_MODEL,
+    max_tokens: 16000,
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default',
+    output_config: { effort: 'medium', format: betaZodOutputFormat(EditSchema) },
+    system: EDIT_PROMPT,
+    messages: [{ role: 'user', content: `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n<requests>\n${requests.join('\n')}\n</requests>` }]
+  });
+  const out = response.parsed_output;
+  if (!out || response.stop_reason === 'refusal') return null;
+  const asked = requests.join('\n').toLowerCase();
+  const was = (list: string[]) => new Set(list.map(x => x.toLowerCase()));
+  // Nothing new that the owner didn't name: employers, schools, certifications
+  const companies = was(cv.experience.map(x => x.company));
+  const schools = was(cv.education.map(e => e.school));
+  const certs = was(cv.certifications);
+  const ok = out.cv.name.trim() && (out.cv.experience.length || !cv.experience.length)
+    && out.cv.experience.every(x => companies.has(x.company.toLowerCase()) || asked.includes(x.company.toLowerCase()))
+    && out.cv.education.every(e => schools.has(e.school.toLowerCase()) || asked.includes(e.school.toLowerCase()))
+    && out.cv.certifications.every(c => certs.has(c.toLowerCase()) || asked.includes(c.toLowerCase()));
+  if (!ok) return null;
+  return { cv: { ...cv, ...out.cv, projects: out.cv.projects.map(p => ({ ...p, desc: p.bullets.join(' ') })) }, changes: out.changes, notDone: out.notDone };
 }

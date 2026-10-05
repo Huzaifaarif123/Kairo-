@@ -47,7 +47,7 @@ const LEXICON = {
     ['Snowflake', 'snowflake'], ['BigQuery', 'bigquery'], ['Redshift', 'redshift'], ['Databricks', 'databricks'],
     ['Airflow', 'airflow'], ['Spark', 'spark', 'pyspark'], ['dbt', 'dbt'], ['Flink', 'flink'], ['Kinesis', 'kinesis'],
     ['ETL', 'etl', 'elt', 'data pipelines', 'data pipeline'], ['Data modeling', 'data modeling', 'data modelling'],
-    ['Pandas', 'pandas'], ['NumPy', 'numpy'], ['Query optimization', 'query optimization', 'indexing', 'schema design']
+    ['pandas', 'pandas'], ['NumPy', 'numpy'], ['Query optimization', 'query optimization', 'indexing', 'schema design']
   ],
   'AI and LLMs': [
     ['LLMs', 'llm', 'llms', 'large language model', 'large language models'], ['Generative AI', 'generative ai', 'genai', 'gen ai'],
@@ -74,7 +74,7 @@ const LEXICON = {
   ],
   'Machine Learning': [
     ['Machine learning', 'machine learning', 'ml'], ['Deep learning', 'deep learning'], ['PyTorch', 'pytorch'],
-    ['TensorFlow', 'tensorflow'], ['JAX', 'jax'], ['Keras', 'keras'], ['Scikit-learn', 'scikit-learn', 'sklearn'],
+    ['TensorFlow', 'tensorflow'], ['JAX', 'jax'], ['Keras', 'keras'], ['scikit-learn', 'scikit-learn', 'sklearn'],
     ['XGBoost', 'xgboost'], ['LightGBM', 'lightgbm'], ['NLP', 'nlp', 'natural language processing'],
     ['Computer vision', 'computer vision', 'opencv'], ['MLOps', 'mlops'], ['MLflow', 'mlflow'], ['Kubeflow', 'kubeflow'],
     ['SageMaker', 'sagemaker'], ['Weights & Biases', 'weights & biases', 'wandb'], ['LangSmith', 'langsmith'],
@@ -299,6 +299,7 @@ const IMPLIED_BY = {
   'LLMs': ['openai', 'gpt-4', 'gpt-4o', 'claude', 'anthropic', 'gemini', 'llama', 'mistral', 'bedrock', 'langchain', 'langgraph'],
   'Generative AI': ['openai', 'claude', 'anthropic', 'gemini', 'llama', 'mistral', 'llm', 'llms', 'large language model', 'rag'],
   'Machine learning': ['pytorch', 'tensorflow', 'scikit-learn', 'sklearn', 'xgboost', 'lightgbm', 'keras'],
+  'MLOps': ['mlflow', 'kubeflow', 'sagemaker', 'vertex ai', 'model registry', 'model lifecycle', 'model monitoring', 'weights & biases', 'dvc'],
   'Deep learning': ['pytorch', 'tensorflow', 'keras', 'jax'],
   'Agentic workflows': ['langgraph', 'crewai', 'autogen', 'agents sdk', 'ai agents', 'agentic', 'multi-agent'],
   'Function calling': ['mcp', 'model context protocol', 'tool calling', 'tool use'],
@@ -462,7 +463,7 @@ const escHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').re
 const escTex = (s) => String(s)
   .replace(/\\/g, '\\textbackslash{}')
   .replace(/([&%$#_{}])/g, '\\$1')
-  .replace(/~/g, '\\textasciitilde{}')
+  .replace(/~/g, '$\\sim$')
   .replace(/\^/g, '\\textasciicircum{}')
   .replace(/[–—]/g, '--')
   .replace(/[“”]/g, '"')
@@ -495,6 +496,16 @@ function metricPhrase(text) {
   // "took 40% off response latency"
   const off = text.match(/\b(?:took|cut|shaved)\s+(\d+(?:\.\d+)?%)\s+off\s+((?:[\w-]+\s+){0,3}[\w-]+)/i);
   if (off) return `a ${off[1]} reduction in ${off[2].trim()}`;
+  // "reducing average prediction latency from 850ms to 320ms"
+  const fromTo = text.match(/\b(reduc\w*|cut\w*|lower\w*|improv\w*|increas\w*|rais\w*|grow\w*|boost\w*)\s+(?:the\s+|average\s+|overall\s+)*((?:[\w-]+\s+){0,3}?[\w-]+)\s+from\s+(\S+)\s+to\s+(?:under\s+)?([\d$£€][^\s,.;]*)/i);
+  if (fromTo) return `${/^(improv|increas|rais|grow|boost)/i.test(fromTo[1]) ? 'an improvement' : 'a reduction'} in ${fromTo[2].trim()} from ${fromTo[3]} to ${fromTo[4]}`;
+  // "processing 20M+ records", "supporting 50K+ monthly requests"
+  const volume = text.match(/\b(?:processing|handling|serving|supporting|transforming)\s+(\d[\d.,]*\s?[kmb]?\+?)\s+((?:daily|monthly|weekly)\s+)?(records|requests|events|transactions|users|rows|messages)\b/i);
+  if (volume) {
+    const what = /\bpipelines?\b/i.test(text) ? 'pipelines' : /\bapis?\b|\bendpoints?\b/i.test(text) ? 'APIs' : /\bplatforms?\b/i.test(text) ? 'a platform' : 'systems';
+    const verb = /\b(?:processing|transforming)\b/i.test(text) ? 'processing' : 'handling';
+    return `${what} ${verb} ${volume[1]} ${volume[2] || ''}${volume[3]}`;
+  }
   const coverage = text.match(/(\d+%)\s+test coverage/i);
   if (coverage) return `${coverage[1]} test coverage`;
   const users = text.match(/(\d{1,3}(?:,\d{3})+\+?)\s+concurrent users/i);
@@ -506,6 +517,51 @@ export function yearsOfExperience(experience) {
   const years = experience.flatMap(x => (x.period.match(/\d{4}/g) || []).map(Number));
   const current = experience.some(x => /present|current|since|now/i.test(x.period)) ? new Date().getFullYear() : Math.max(...years);
   return years.length ? current - Math.min(...years) : 0;
+}
+
+// The role itself for the headline: "Full Stack Engineer - AI Products" -> "Full Stack
+// Engineer" (the part after the dash names the team or product, not the job)
+function roleTitle(title) {
+  const clean = cleanJobTitle(title);
+  const [core, ...rest] = clean.split(/\s+[-–—|]\s+|,\s+/);
+  const suffix = rest.join(' ');
+  return core && rest.length && core.trim().split(/\s+/).length >= 2
+    && /\b(products?|team|squad|group|org|organi[sz]ation|division|department|unit|studio|labs?|platform team|payments|growth|marketplace)\b|^(at|for)\s/i.test(suffix)
+    ? core.trim() : clean;
+}
+
+// Summary sentence 2: the candidate's skills for this posting, grouped by where they're
+// used ("React and Next.js on the frontend, Python and Django on the backend, …")
+const STACK_LAYERS = [
+  ['', ['Languages']],
+  ['on the frontend', ['Frontend']],
+  ['on the backend', ['Backend and APIs']],
+  ['for data', ['Databases', 'Data Engineering']],
+  ['for machine learning', ['Machine Learning', 'MLOps and Evaluation', 'LLM Training and Fine Tuning']],
+  ['for AI features', ['Generative AI and LLMs', 'AI Agents and Orchestration', 'RAG and Retrieval', 'Inference and Model Serving']],
+  ['for cloud delivery', ['Cloud and Infrastructure']],
+  ['for observability', ['Monitoring and Observability']],
+  ['for testing', ['Testing']],
+  ['for design', ['Design']]
+];
+// Words that name a whole area, not a skill ("machine learning ... for machine learning")
+const AREA_NAMES = /^(machine learning|ai|mlops|data engineering|frontend|backend)$/i;
+function stackSentence(names, inSentence) {
+  const layers = STACK_LAYERS.map(([where]) => ({ where, items: [] }));
+  for (const name of names) {
+    const cat = categoryOf(name);
+    if (!cat || cat === 'Other Tools' || AREA_NAMES.test(name)) continue;
+    const i = STACK_LAYERS.findIndex(([, cats]) => cats.includes(cat));
+    if (i >= 0 && layers[i].items.length < 4) layers[i].items.push(inSentence(name));
+  }
+  // Languages lead ("in Python and SQL, with …"); then each area with where it's used
+  const [langs, ...rest] = layers;
+  const used = rest.filter(l => l.items.length).slice(0, 5);
+  if (used.length + (langs.items.length ? 1 : 0) < 2) return '';
+  const parts = used.map(l => `${joinList(l.items)} ${l.where}`);
+  // Lists inside lists: two groups join with ", and"; more use semicolons
+  const areas = parts.length === 1 ? parts[0] : parts.length === 2 ? parts.join(', and ') : `${parts.slice(0, -1).join('; ')}; and ${parts[parts.length - 1]}`;
+  return langs.items.length ? `Strong expertise in ${joinList(langs.items)}, with ${areas}.` : `Strong expertise across ${areas}.`;
 }
 
 // The posting's title without gender markers, locations, reference numbers or "remote"
@@ -574,7 +630,7 @@ function categoryOf(name, fromGroup = '') {
 }
 
 // "vector search" -> "Vector search"; brands written in lower case stay as they are
-const LOWERCASE_BRANDS = new Set(['pgvector', 'dbt', 'npm', 'pnpm', 'yarn', 'vllm', 'grpc', 'ios', 'macos', 'k8s', 'jq', 'tRPC'.toLowerCase(), 'webpack', 'vite']);
+const LOWERCASE_BRANDS = new Set(['pgvector', 'dbt', 'npm', 'pnpm', 'yarn', 'vllm', 'grpc', 'ios', 'macos', 'k8s', 'jq', 'tRPC'.toLowerCase(), 'webpack', 'vite', 'scikit-learn', 'pandas']);
 function capitalise(name) {
   const n = String(name || '').trim();
   if (!/^[a-z]/.test(n) || LOWERCASE_BRANDS.has(n.split(/[\s(]/)[0].toLowerCase())) return n;
@@ -614,8 +670,134 @@ function taglineFor(focus, importance) {
 
 // Recent roles keep more detail; older roles are trimmed to what's most relevant.
 // Bullets that don't help with the posting are only used to reach the minimum.
-const BULLETS_PER_ROLE = [8, 7, 6, 5, 4];
-const MIN_BULLETS_PER_ROLE = [5, 4, 3, 3, 2];
+// Every job shows the same number of points, so the CV reads balanced: five each, or
+// six each when there are only one or two jobs
+const MIN_POINTS = 5;
+const pointsPerJob = (jobs) => (jobs <= 2 ? 6 : MIN_POINTS);
+
+// One point that holds two ("Built X…, and reduced Y by 40%"; "… . Led …"; "…, while
+// maintaining Z") as separate points, using only its own words. One part when it can't.
+export function splitPoint(text) {
+  const t = String(text || '').trim();
+  const done = (x) => { const y = x.trim().replace(/^[,;\s]+|[,;\s]+$/g, ''); return y ? `${y[0].toUpperCase()}${y.slice(1).replace(/[.]?$/, '.')}` : ''; };
+  const enough = (x) => x.trim().split(/\s+/).length >= 4;
+  const isPast = (w) => PAST_VERBS.has(w) || (/^[a-z]{3,}ed$/.test(w) && !/eed$/.test(w));
+  // two sentences
+  const sentences = t.split(/(?<=[.!?])\s+(?=[A-Z])/);
+  if (sentences.length > 1 && sentences.every(enough)) return sentences.map(done);
+  // "; " between two things done
+  let m = t.match(/^(.+?);\s+(.+)$/);
+  if (m && enough(m[1]) && enough(m[2]) && isPast((m[2].match(/^[A-Za-z]+/) || [''])[0].toLowerCase())) return [done(m[1]), done(m[2])];
+  // ", and reduced …" / " and led …"
+  m = t.match(/^(.+?),?\s+and\s+([a-z]+)\b(.*)$/);
+  if (m && isPast(m[2]) && enough(m[1]) && enough(`${m[2]}${m[3]}`)) return [done(m[1]), done(`${m[2]}${m[3]}`)];
+  // ", while maintaining …" -> "Maintained …"
+  m = t.match(/^(.+?),?\s+while\s+([a-z]+ing)\b(.*)$/);
+  if (m && GERUND_PAST[m[2]] && enough(m[1]) && enough(`${m[2]}${m[3]}`)) return [done(m[1]), done(`${GERUND_PAST[m[2]]}${m[3]}`)];
+  return [t];
+}
+
+// Standard points for a job that has fewer than five: the typical work of that kind of
+// role, naming only tools from the job's own points (or the CV's skills), with no
+// numbers. Each has a theme, so a job that already covers it doesn't get it twice.
+const STANDARD_POINTS = {
+  frontend: [
+    [/component|ui\b|interface|responsive|accessib|dashboard|page|screen/i, (t) => `Built responsive, accessible UI components${t ? ` with ${t}` : ''} from design specs.`, ['Frontend']],
+    [/test/i, (t) => `Wrote unit and integration tests for new features${t ? ` with ${t}` : ''} to keep releases stable.`, ['Testing']],
+    [/review|pull request/i, () => 'Reviewed pull requests and shared feedback to keep code quality consistent.'],
+    [/product|design(er)?s?\b|stakeholder|collaborat/i, () => 'Partnered with product and design to turn requirements into shipped features.'],
+    [/bug|issue|performance|optimi/i, () => 'Fixed production bugs and improved page performance in existing features.'],
+    [/document/i, () => 'Documented components and setup steps so new developers could onboard faster.']
+  ],
+  backend: [
+    [/api|service|endpoint/i, (t) => `Designed and maintained ${t ? `${t} ` : ''}services and APIs used by internal and customer-facing apps.`, ['Backend and APIs']],
+    [/test/i, () => 'Wrote unit and integration tests for services to keep releases stable.'],
+    [/database|quer|schema|migration|sql|postgres|mysql|mongo/i, (t) => `Wrote database queries and migrations${t ? ` for ${t}` : ''} as features grew.`, ['Databases']],
+    [/review|pull request/i, () => 'Reviewed pull requests and shared feedback to keep code quality consistent.'],
+    [/bug|issue|incident|troubleshoot|production/i, () => 'Investigated and fixed production issues, and added logging to catch them earlier.'],
+    [/document/i, () => 'Documented APIs and setup steps so other teams could integrate faster.']
+  ],
+  fullstack: [
+    [/frontend|backend|feature|end-to-end|full stack|dashboard|api|flows?\b|app\b|site/i, (t) => `Built and maintained features across the frontend and backend${t ? ` with ${t}` : ''}.`, ['Frontend', 'Backend and APIs']],
+    [/test/i, () => 'Wrote unit and integration tests for new features to keep releases stable.'],
+    [/review|pull request/i, () => 'Reviewed pull requests and shared feedback to keep code quality consistent.'],
+    [/product|design(er)?s?\b|stakeholder|collaborat/i, () => 'Partnered with product and design to turn requirements into shipped features.'],
+    [/bug|issue|performance|optimi/i, () => 'Fixed production bugs and improved performance in existing features.'],
+    [/document/i, () => 'Documented APIs and setup steps so new developers could onboard faster.']
+  ],
+  data: [
+    [/dataset|data prep|clean|validat|feature/i, (t) => `Prepared and validated datasets${t ? ` with ${t}` : ''} for analysis and model training.`, ['Data Engineering', 'Machine Learning']],
+    [/monitor|drift|retrain/i, () => 'Monitored model and pipeline performance in production and fixed issues as they appeared.'],
+    [/experiment|evaluat|benchmark/i, () => 'Documented experiments and results to support model and design decisions.'],
+    [/deploy|production|engineer/i, () => 'Partnered with engineering teams to take models and pipelines into production.'],
+    [/review|pull request/i, () => 'Reviewed code and analyses to keep results reproducible and correct.'],
+    [/stakeholder|business|product|collaborat/i, () => 'Explained findings to product and business stakeholders to guide decisions.']
+  ],
+  devops: [
+    [/ci\/cd|pipeline|deploy|release/i, (t) => `Maintained CI/CD pipelines and deployment scripts${t ? ` with ${t}` : ''}.`, ['Cloud and Infrastructure']],
+    [/monitor|alert|incident|on-call/i, () => 'Monitored services and responded to incidents to keep systems available.'],
+    [/infrastructure|terraform|iac|provision/i, () => 'Managed cloud infrastructure as code for repeatable environments.'],
+    [/security|access|permission/i, () => 'Applied security updates and access controls across environments.'],
+    [/document|runbook/i, () => 'Wrote runbooks and documentation so the team could handle incidents faster.'],
+    [/developer|team|collaborat/i, () => 'Supported development teams with build, release and environment issues.']
+  ],
+  general: [
+    [/collaborat|team|stakeholder|product/i, () => 'Partnered with cross-functional teams to deliver features on schedule.'],
+    [/test/i, () => 'Wrote tests for new work to keep releases stable.'],
+    [/review|pull request/i, () => 'Took part in code reviews to keep quality consistent.'],
+    [/bug|issue|troubleshoot/i, () => 'Investigated and resolved production issues.'],
+    [/document/i, () => 'Wrote clear documentation for features and processes.'],
+    [/agile|sprint|plan/i, () => 'Took part in sprint planning and estimation.']
+  ]
+};
+
+// The kind of job its title names, or '' for a generic title ("Software Engineer")
+function roleFamily(role) {
+  const r = String(role || '').toLowerCase();
+  if (/full[\s-]?stack/.test(r)) return 'fullstack';
+  if (/front[\s-]?end|\bui\b|web developer|react|angular|vue/.test(r)) return 'frontend';
+  if (/back[\s-]?end|\bapi\b|server/.test(r)) return 'backend';
+  if (/data|machine learning|\bml\b|\bai\b|scientist|analyst|analytics/.test(r)) return 'data';
+  if (/devops|\bsre\b|site reliability|cloud|infrastructure/.test(r)) return 'devops';
+  return '';
+}
+
+/** Standard points to bring a job up to five (see STANDARD_POINTS). */
+function standardPoints(job, cvSkills, needed) {
+  if (needed <= 0) return [];
+  const own = job.bullets.join(' ');
+  const toolsHere = TERMS.filter(t => t.category !== 'Ways of Working' && t.name !== 'AI' && countMatches(t.re, own) > 0).map(t => t.name);
+  // tools of the right kind, and only ones this job's own points mention
+  const toolsFor = (kinds) => (kinds && kinds.length ? joinList(toolsHere.filter(n => kinds.includes(categoryOf(n))).slice(0, 2)) : '');
+  // the kind of job from what its points show (mostly UI work = frontend), else its title
+  const kinds = toolsHere.map(n => categoryOf(n));
+  const count = (...c) => kinds.filter(k => c.includes(k)).length;
+  const fe = count('Frontend'), be = count('Backend and APIs', 'Databases'), da = count('Data Engineering', 'Machine Learning', 'MLOps and Evaluation'), ops = count('Cloud and Infrastructure', 'Monitoring and Observability');
+  // (CI/CD and cloud tools count only when nothing else does: nearly every engineer uses them)
+  const top = Math.max(fe, be, da);
+  const family = roleFamily(job.role)
+    || (top ? (fe && be ? 'fullstack' : top === fe ? 'frontend' : top === da ? 'data' : 'backend')
+      : ops ? 'devops' : 'general');
+  const out = [];
+  for (const [theme, make, kindsFor] of STANDARD_POINTS[family]) {
+    if (out.length >= needed) break;
+    if (theme.test(own)) continue;
+    out.push(make(toolsFor(kindsFor)));
+  }
+  return out;
+}
+
+// A job's points made up to five by splitting the ones that hold two; never invented
+function atLeastFive(bullets, target = MIN_POINTS) {
+  let list = [...bullets];
+  for (let guard = 0; list.length < target && guard < 10; guard++) {
+    const order = list.map((b, i) => ({ b, i, n: b.split(/\s+/).length })).sort((a, b) => b.n - a.n);
+    const hit = order.find(o => splitPoint(o.b).length > 1);
+    if (!hit) break;
+    list = [...list.slice(0, hit.i), ...splitPoint(hit.b), ...list.slice(hit.i + 1)];
+  }
+  return list;
+}
 // Skills that don't relate to the posting: at most this many per group
 const OTHER_SKILLS_PER_GROUP = 2;
 const MAX_PROJECTS = 4;
@@ -645,9 +827,19 @@ export function tailorCV({ title = '', company = '', description = '', confirmed
   const relevance = (text) => terms.reduce((s, t) => s + (countMatches(t.re, text) > 0 ? importance.get(t.name) : 0), 0)
     + evidence.reduce((s, e) => s + (countMatches(e.re, text) > 0 ? e.w : 0), 0);
 
+  // The posting's requirements a piece of text demonstrates (by name or by a tool that proves it)
+  const requiredTerms = terms.filter(t => t.required && !t.soft);
+  const demonstrates = (text) => requiredTerms.filter(t => countMatches(t.re, text) > 0
+    || (IMPLIED_RE[t.name] || []).some(e => countMatches(e.re, text) > 0)).map(t => t.name);
+  // Requirements already shown by bullets picked for more recent roles
+  const shownInWork = new Set();
+
   // Experience: rank bullets by how many job requirements they evidence
-  let dropped = 0, reordered = 0;
-  const experience = profile.experience.map((job, i) => {
+  let dropped = 0, reordered = 0, split = 0;
+  const experience = profile.experience.map((sourceJob, i) => {
+    // fewer than five points: the ones that hold two become two
+    const job = sourceJob.bullets.length < pointsPerJob(profile.experience.length) ? { ...sourceJob, bullets: atLeastFive(sourceJob.bullets, pointsPerJob(profile.experience.length)) } : sourceJob;
+    split += job.bullets.length - sourceJob.bullets.length;
     // A recruiter reads results before duties: a relevant bullet with a measured result
     // (Google's XYZ) ranks above an equally relevant one without, and duty-style
     // openers rank lower. Relevance still decides which bullets count as relevant.
@@ -659,23 +851,45 @@ export function tailorCV({ title = '', company = '', description = '', confirmed
     });
     // Relevant bullets first, then by rank
     const ranked = [...scored].sort((a, b) => Number(b.score > 0) - Number(a.score > 0) || b.rank - a.rank || b.score - a.score || a.idx - b.idx);
-    const limit = BULLETS_PER_ROLE[i] ?? 2;
-    const min = Math.min(MIN_BULLETS_PER_ROLE[i] ?? 2, limit);
-    const relevant = ranked.filter(b => b.score > 0);
+    const limit = pointsPerJob(profile.experience.length);
+    const min = limit;
+    // Tailoring, not keyword stacking: the role's bullets are picked so that together they
+    // answer as much of the posting as possible. Each next bullet is the one that shows
+    // the most requirements not yet shown (in this CV, then in this role), plus its rank.
+    const pool = ranked.filter(b => b.score > 0).map(b => ({ ...b, covers: demonstrates(b.text) }));
+    const relevant = [];
+    const inRole = new Set();
+    while (pool.length) {
+      const gain = (b) => b.rank + 3 * b.covers.filter(n => !shownInWork.has(n) && !inRole.has(n)).length + b.covers.filter(n => !inRole.has(n)).length;
+      pool.sort((a, b) => gain(b) - gain(a) || a.idx - b.idx);
+      const next = pool.shift();
+      next.covers.forEach(n => inRole.add(n));
+      relevant.push(scored.find(b => b.idx === next.idx));
+    }
     let kept = (relevant.length >= min ? relevant : ranked).slice(0, Math.max(min, Math.min(limit, relevant.length)));
     // Spare room: up to two more measured results, even when they name other tools
     // ("achieving 90% test coverage"), after the relevant bullets
-    const extra = ranked.filter(b => b.score === 0 && b.measured && !kept.includes(b)).slice(0, Math.min(2, limit - kept.length));
+    const extra = ranked.filter(b => b.score === 0 && b.measured && !kept.includes(b)).slice(0, Math.max(0, Math.min(2, limit - kept.length)));
     kept = [...kept, ...extra];
-    dropped += job.bullets.length - kept.length;
+    kept.forEach(b => demonstrates(b.text).forEach(n => shownInWork.add(n)));
+    dropped += Math.max(0, job.bullets.length - kept.length);
     if (kept.some((b, n) => b.idx !== n)) reordered++;
     return { ...job, bullets: kept };
   });
   if (reordered) changes.push(`Reordered bullets in ${reordered} role${reordered > 1 ? 's' : ''} so the most relevant achievements come first`);
   if (dropped) changes.push(`Trimmed ${dropped} less relevant bullet${dropped > 1 ? 's' : ''} to keep the CV focused`);
+  if (split) changes.push(`Split ${split === 1 ? 'a long point' : `${split} long points`} that each held two achievements into separate points`);
+  // Jobs still under five: standard points for that kind of role (listed so they can be checked)
+  const cvSkills = profile.skills.flatMap(g => g.items).filter(n => TERMS.some(t => t.name.toLowerCase() === String(n).toLowerCase()));
+  for (const x of experience) {
+    const add = standardPoints({ role: x.role, bullets: x.bullets.map(b => b.text) }, cvSkills, pointsPerJob(experience.length) - x.bullets.length);
+    if (!add.length) continue;
+    x.bullets.push(...add.map(text => ({ text, idx: -1, score: 0, rank: 0, measured: false })));
+    changes.push(`Added ${add.length} standard point${add.length > 1 ? 's' : ''} to ${x.company || x.role} so it has ${x.bullets.length} (typical work for this role; check ${add.length > 1 ? 'they match' : 'it matches'} what you did): ${add.map(a => `"${a}"`).join(' ')}`);
+  }
 
   // Skills: matched items first inside each group, most relevant groups first
-  const isMatch = (item) => terms.some(t => countMatches(t.re, item) > 0);
+  const isMatch = (item) => terms.some(t => countMatches(t.re, item) > 0 || t.name.toLowerCase() === String(item).toLowerCase());
   let skills = profile.skills.filter(g => g.items.length).map(g => ({ group: g.group, items: g.items.map(name => ({ name, matched: isMatch(name) })) }));
 
   // Skills the posting asks for that the profile proves under another name (CI/CD shown
@@ -694,12 +908,6 @@ export function tailorCV({ title = '', company = '', description = '', confirmed
   const added = matched.filter(m => m.confirmed && addToSkills(m)).map(m => m.name);
   if (added.length) changes.push(`Added ${added.length} skill${added.length > 1 ? 's' : ''} you confirmed: ${joinList(added)}`);
 
-  // Every requirement you cover should appear in the posting's own words somewhere in the
-  // CV (ATS systems match keywords literally): "vector databases", not only "vector search"
-  const cvWords = () => [...skills.flatMap(g => g.items.map(i => i.name)), ...experience.flatMap(x => x.bullets.map(b => b.text))].join('\n');
-  const worded = matched.filter(m => m.required && !m.soft && !m.implied && !m.confirmed
-    && countMatches(m.re, cvWords()) === 0 && addToSkills(m)).map(m => m.name);
-  if (worded.length) changes.push(`Used the posting's wording in your skills: ${joinList(worded)}`);
 
   // Sort every skill into the template's standard categories (Languages, Generative AI
   // and LLMs, …, Databases). Inside each category, what matches or supports the posting
@@ -733,7 +941,7 @@ export function tailorCV({ title = '', company = '', description = '', confirmed
 
   // Headline and key-skills line
   const recent = profile.experience[0];
-  const headline = cleanJobTitle(title) || profile.title || (recent ? recent.role : '');
+  const headline = roleTitle(title) || profile.title || (recent ? recent.role : '');
   // Required skills lead; soft skills and very generic terms stay out of the headline areas
   const focus = terms.filter(t => !t.soft && !['AI', 'Testing', 'Observability', 'Security'].includes(t.name))
     .sort((a, b) => Number(b.required) - Number(a.required));
@@ -789,18 +997,30 @@ export function tailorCV({ title = '', company = '', description = '', confirmed
     : 'full delivery lifecycle';
   const sentences = [];
   sentences.push(`${shortTitle} with ${years ? `${years}+ years of ` : ''}experience building and deploying production ${domain}.`);
-  if (expertise.length) sentences.push(`Strong expertise in ${joinList(expertise)}.`);
+  const stack = stackSentence(focus.slice(0, 10).map(t => t.name), inSentence);
+  if (stack) sentences.push(stack);
+  else if (expertise.length) sentences.push(`Strong expertise in ${joinList(expertise)}.`);
   if (stages.length >= 3) sentences.push(`Experienced across the ${lifecycle}, including ${joinList(stages.slice(0, 6))}.`);
   // One sentence from the profile's own summary that speaks to this posting (not written
   // in the first person, not restating years, not too long)
   const own = profile.summary.split(/(?<=[.!?])\s+(?=[A-Z])/).map(x => x.trim()).filter(Boolean)
     // mostly about this job: at least half the technologies it names are ones the posting wants
     .map(x => ({ x, score: relevance(x), named: TERMS.filter(t => countMatches(t.re, x) > 0), wanted: terms.filter(t => countMatches(t.re, x) > 0) }))
-    .filter(o => o.score > 0 && o.wanted.length * 2 >= o.named.length && words(o.x) <= 45 && !/\b(i|i'm|i am|my|me)\b/i.test(o.x) && !/\d+\+?\s*years/i.test(o.x))
+    // (a real sentence: a bare title like "Machine learning engineer." isn't added)
+    .filter(o => o.score > 0 && o.wanted.length * 2 >= o.named.length && words(o.x) >= 8 && words(o.x) <= 45 && !/\b(i|i'm|i am|my|me)\b/i.test(o.x) && !/\d+\+?\s*years/i.test(o.x))
     .sort((a, b) => b.score - a.score)[0];
   if (metrics.length) sentences.push(`Proven impact includes ${joinList(metrics)}.`);
   else if (own) sentences.push(own.x);
   const summary = sentences.join(' ');
+
+  // Every requirement you cover should appear in the posting's own words somewhere in the
+  // CV (ATS systems match keywords literally). Only when no bullet, project or summary line
+  // shows it is the posting's wording added to your skills.
+  const cvWords = [summary, ...skills.flatMap(g => g.items.map(i => i.name)), ...experience.flatMap(x => x.bullets.map(b => b.text)),
+    ...profile.projects.map(pr => `${pr.name} ${pr.desc}`)].join('\n');
+  const worded = matched.filter(m => m.required && !m.soft && !m.implied && !m.confirmed
+    && countMatches(m.re, cvWords) === 0 && addToSkills(m)).map(m => m.name);
+  if (worded.length) changes.push(`Listed ${joinList(worded)} in your skills (your profile mentions ${worded.length > 1 ? 'them' : 'it'}, but no bullet does)`);
   changes.unshift(focus.length
     ? `Wrote a new summary around ${joinList(focus.slice(0, 3).map(t => t.name))}`
     : 'Wrote a general summary (no specific technologies detected in the posting)');
@@ -973,7 +1193,7 @@ export function renderTailoredCV(cv, { title = '', company = '', description = '
   const hasJob = Boolean(String(description).trim() || String(title).trim());
   const found = hasJob ? analyseJob(description, title, profileMd, confirmedSkills) : { matched: [], missing: [] };
   const { matched } = found;
-  const isMatch = (item) => matched.some(t => countMatches(t.re, item) > 0);
+  const isMatch = (item) => matched.some(t => countMatches(t.re, item) > 0 || t.name.toLowerCase() === String(item).toLowerCase());
   const out = { ...clean, skills: clean.skills.map(g => ({ group: g.group, items: g.items.map(i => ({ name: i.name, matched: isMatch(i.name) })) })) };
   const layoutId = CV_TEMPLATES[template] ? template : DEFAULT_TEMPLATE;
   const layout = renderLayout(layoutId, out, matched, title, company, styles && styles[layoutId]);
@@ -1013,7 +1233,8 @@ function cvCoverage(cv, matched) {
     ...(cv.projects || []).map(p => `${p.name} ${p.desc}`)
   ].join('\n');
   const needed = matched.filter(t => t.required && !t.soft);
-  const shown = needed.filter(t => countMatches(t.re, text) > 0);
+  const listed = new Set(cv.skills.flatMap(g => g.items.map(i => String(typeof i === 'string' ? i : i.name).toLowerCase())));
+  const shown = needed.filter(t => countMatches(t.re, text) > 0 || listed.has(t.name.toLowerCase()));
   return {
     cvScore: needed.length ? Math.round((shown.length / needed.length) * 100) : 100,
     cvShown: shown.length,
@@ -1056,7 +1277,7 @@ const GERUND_PAST = {
 const PAST_VERBS = new Set([...Object.values(GERUND_PAST).map(v => v.toLowerCase()),
   'took', 'made', 'cut', 'won', 'set', 'put', 'got', 'gave', 'kept', 'held', 'sold', 'taught', 'found', 'rewrote', 'undertook',
   'stood', 'spun', 'split', 'shut', 'sped', 'bought', 'brought', 'began', 'became', 'chose', 'saw', 'drew', 'flew', 'fought',
-  'built', 'led', 'ran', 'wrote', 'drove', 'grew', 'oversaw', 'rebuilt', 'spent', 'sent', 'met', 'beat', 'overcame', 'hired']);
+  'built', 'led', 'ran', 'wrote', 'drove', 'grew', 'oversaw', 'rebuilt', 'spent', 'sent', 'met', 'beat', 'overcame', 'hired', 'used', 'fixed', 'won']);
 // Bullet symbols and invisible characters a pasted or uploaded CV can start a line with
 const LEAD_SYMBOLS = /^[\p{Cc}\p{Cf}\p{Co}\p{So}•●▪■◦‣∙·*\-–—>\s]+/u;
 const PRESENT_VERBS = new Set(['cut', 'set', 'own', 'win', 'make', 'take', 'drive', 'grow', 'oversee', 'spearhead', 'architect', 'partner', 'advise', 'teach', 'coach']);
@@ -1099,6 +1320,7 @@ const UNITS = 'k|m|mm|bn|million|billion|thousand|hours?|hrs?|minutes?|mins?|sec
 const MEASURE = new RegExp(String.raw`\d+(?:\.\d+)?\s*(?:%|x\b|\+)|[$£€₹]\s?\d|\b\d{1,3}(?:,\d{3})+\b|\b\d+(?:\.\d+)?\s*(?:${UNITS})\b|`
   + String.raw`\b(?:doubled|tripled|quadrupled|halved)\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|hundreds?|thousands?|millions?|dozens?)\s+(?:of\s+)?(?:hours?|days?|weeks?|months?|minutes?|seconds?|years?|times|engineers?|developers?|teams?|people|clients?|customers?|users?|services|countries|markets|products|releases)\b|`
   + String.raw`\b(?:twice|thrice|three times)\b|\b(?:daily|weekly|hourly|bi-?weekly)\s+(?:releases?|deploy\w*|shipping)\b|\b(?:zero|no|without)[\s-]downtime\b|`
+  + String.raw`\bfrom\s+[$£€]?\d[\d.,]*\s*[%a-z]*\s+to\s+(?:under\s+|below\s+)?[$£€]?\d|`
   + String.raw`\b(?:team|group|squad|staff|cohort) of \d+\b|\b(?:top|over|under|within|than) \d+(?:\.\d+)?\b`, 'i');
 // A year ("in 2021") is not a result; "2000 users" is
 const YEAR_ONLY = new RegExp(String.raw`\b(?:19|20)\d{2}\b(?!\s*(?:\+|%|${UNITS})\b)`, 'gi');
@@ -1118,6 +1340,560 @@ function hasAction(rawText) {
   const base = w.endsWith('es') && GERUND_PAST[`${w.slice(0, -2)}ing`] ? w.slice(0, -2) : w.endsWith('s') ? w.slice(0, -1) : w;
   return Boolean(GERUND_PAST[`${base}ing`] || GERUND_PAST[`${base.slice(0, -1)}ing`] || GERUND_PAST[`${base}${base.slice(-1)}ing`]
     || PRESENT_VERBS.has(base));
+}
+
+// ---------- "Tell it what to add or change" ----------
+// Plain instructions typed under the CV ("Under Brightloop add: built GraphQL APIs…",
+// "Add skills: Kubernetes, Terraform", "Remove PHP", "Change headline to …") applied to
+// the CV. Only what the instruction says is added; anything unclear is reported back.
+
+const PAST_TO_GERUND = {
+  reduced: 'reducing', cut: 'cutting', improved: 'improving', increased: 'increasing', saved: 'saving', lowered: 'lowering',
+  boosted: 'boosting', doubled: 'doubling', halved: 'halving', grew: 'growing', 'sped up': 'speeding up', made: 'making',
+  helped: 'helping', raised: 'raising', shortened: 'shortening', removed: 'removing', prevented: 'preventing', enabled: 'enabling'
+};
+const RESULT_VERBS = Object.keys(PAST_TO_GERUND).join('|');
+
+/** Someone's own words as a CV point: "I set up kafka and it cut errors by 30%" -> "Set up Kafka, cutting errors by 30%." */
+export function cleanPoint(text) {
+  let t = String(text || '').replace(CONTROL_CHARS, '').replace(/\s+/g, ' ').trim()
+    .replace(/^["“'`]+|["”'`]+$/g, '').replace(/[.!\s]+$/, '');
+  if (!t) return '';
+  t = t.replace(/^(?:I|we)\s+(?:have|had)\s+/i, '').replace(/^(?:I|we)['’]ve\s+/i, '').replace(/^(?:I|we)\s+(?=[a-z])/i, '')
+    .replace(/\bapi(s?)\b/g, 'API$1');
+  t = polishBullet(t);
+  const g = t.match(/^([A-Za-z]+ing)\b/);
+  if (g && GERUND_PAST[g[1].toLowerCase()]) t = GERUND_PAST[g[1].toLowerCase()] + t.slice(g[0].length);
+  t = t.replace(new RegExp(String.raw`,?\s+(?:and\s+)?(?:it|this|that|which)\s+(${RESULT_VERBS})\b|\s+and\s+(${RESULT_VERBS})\b`, 'gi'),
+    (m, a, b) => `, ${PAST_TO_GERUND[(a || b).toLowerCase()]}`);
+  // Tools in their proper spelling: "kafka" -> "Kafka", plus a few common short forms
+  for (const x of TERMS) {
+    if (x.category === 'Ways of Working' || x.name.length < 3 || COMMON_WORDS.has(x.name.toLowerCase())) continue;
+    t = t.replace(new RegExp(`(?<![A-Za-z0-9])${escapeRe(x.name)}(?![A-Za-z0-9])`, 'gi'), (m) => (m === x.name ? m : x.name));
+  }
+  t = t.replace(/\bpostgres\b/gi, 'PostgreSQL').replace(/\bk8s\b/gi, 'Kubernetes').replace(/\bgolang\b/gi, 'Go');
+  t = t[0].toUpperCase() + t.slice(1);
+  return `${t.replace(/\s+,/g, ',')}.`;
+}
+
+// A job or project named in an instruction ("Brightloop", "my current job", "ShipFast")
+function findPlace(cv, target) {
+  const t = String(target || '').toLowerCase().replace(/^(?:my|the)\s+/, '').replace(/\s+(?:job|role|company|project|position)$/, '').trim();
+  if (!t) return null;
+  if (/^(current|latest|last|recent|most recent|present|first)\b/.test(t)) return cv.experience.length ? { kind: 'exp', i: 0 } : null;
+  const has = (name) => { const n = String(name || '').toLowerCase(); return n && (n === t || n.includes(t) || (t.includes(n) && n.length >= 3)); };
+  let i = cv.experience.findIndex(x => has(x.company));
+  if (i >= 0) return { kind: 'exp', i };
+  i = cv.projects.findIndex(p => has(p.name));
+  if (i >= 0) return { kind: 'proj', i };
+  i = cv.experience.findIndex(x => has(x.role));
+  return i >= 0 ? { kind: 'exp', i } : null;
+}
+
+const placeName = (cv, p) => (p.kind === 'exp' ? [cv.experience[p.i].role, cv.experience[p.i].company].filter(Boolean).join(' at ') : `the ${cv.projects[p.i].name} project`);
+
+function addPoint(cv, place, text, done) {
+  const point = cleanPoint(text);
+  if (!point) return false;
+  if (place.kind === 'exp') cv.experience[place.i].bullets.unshift(point);
+  else {
+    const pr = cv.projects[place.i];
+    pr.bullets = pr.bullets && pr.bullets.length ? pr.bullets : [pr.desc].filter(Boolean);
+    pr.bullets.push(point);
+    pr.desc = pr.bullets.join(' ');
+  }
+  done.push(`Added to ${placeName(cv, place)}: "${point}"`);
+  return true;
+}
+
+// A skill as typed, in its usual spelling, with the skills category it belongs in
+function skillName(raw) {
+  const s = String(raw || '').trim().replace(/^["“']|["”']$/g, '').replace(/[.]$/, '');
+  const term = TERMS.find(x => x.name.toLowerCase() === s.toLowerCase()) || TERMS.find(x => { const re = new RegExp(`^(?:${x.re.source})$`, 'i'); return re.test(s); });
+  return term ? term.name : s;
+}
+
+function addSkills(cv, list, done, added) {
+  const names = String(list).split(/\s*(?:,|;|\band\b|&)\s*/i).map(skillName).filter(n => n && n.length <= 60);
+  const fresh = [];
+  for (const name of names) {
+    if (cv.skills.some(g => g.items.some(i => i.name.toLowerCase() === name.toLowerCase()))) continue;
+    const group = categoryOf(name) || 'Other Tools';
+    let g = cv.skills.find(x => x.group === group);
+    if (!g) { g = { group, items: [] }; cv.skills.push(g); }
+    g.items.unshift({ name, matched: false });
+    fresh.push(name);
+    added.push(name);
+  }
+  if (fresh.length) done.push(`Added to your skills: ${joinList(fresh)}`);
+  else done.push(`${joinList(names)} ${names.length > 1 ? 'are' : 'is'} already in your skills`);
+}
+
+function removeThing(cv, rawTarget, done, unclear, raw) {
+  let t = String(rawTarget).trim().replace(/^["“']|["”']$/g, '').replace(/\.$/, '')
+    .replace(/^(?:the\s+)?(?:point|bullet|line|sentence)s?\s+(?:about|on|with|containing|that says|saying)\s+/i, '')
+    .replace(/^(?:the\s+)?skills?\s+/i, '').replace(/\s+from\s+(?:my\s+|the\s+)?(?:skills|cv|resume)$/i, '').trim();
+  if (!t) { unclear.push(raw); return; }
+  const section = t.toLowerCase().replace(/^the\s+/, '').replace(/\s+section$/, '');
+  if (['projects', 'certifications', 'education'].includes(section)) {
+    cv[section] = [];
+    done.push(`Removed the ${section} section`);
+    return;
+  }
+  const name = skillName(t).toLowerCase();
+  for (const g of cv.skills) {
+    const before = g.items.length;
+    g.items = g.items.filter(i => i.name.toLowerCase() !== name);
+    if (g.items.length < before) {
+      cv.skills = cv.skills.filter(x => x.items.length);
+      done.push(`Removed ${skillName(t)} from your skills`);
+      return;
+    }
+  }
+  const low = t.toLowerCase();
+  const pi = cv.projects.findIndex(p => p.name.toLowerCase() === low);
+  if (pi >= 0) { done.push(`Removed the ${cv.projects[pi].name} project`); cv.projects.splice(pi, 1); return; }
+  const ci = cv.certifications.findIndex(c => c.toLowerCase().includes(low));
+  if (ci >= 0) { done.push(`Removed the certification "${cv.certifications[ci]}"`); cv.certifications.splice(ci, 1); return; }
+  const hits = [];
+  cv.experience.forEach((x, i) => x.bullets.forEach((b, j) => { if (b.toLowerCase().includes(low)) hits.push({ i, j, b, exp: true }); }));
+  cv.projects.forEach((p, i) => (p.bullets || []).forEach((b, j) => { if (b.toLowerCase().includes(low)) hits.push({ i, j, b, exp: false }); }));
+  if (!hits.length) { unclear.push(`${raw} (nothing on the CV matches "${t}")`); return; }
+  if (hits.length > 2) { unclear.push(`${raw} (${hits.length} points mention "${t}"; quote more of the point you mean)`); return; }
+  for (const h of hits.sort((a, b) => b.j - a.j)) {
+    if (h.exp) cv.experience[h.i].bullets.splice(h.j, 1);
+    else { const p = cv.projects[h.i]; p.bullets.splice(h.j, 1); p.desc = p.bullets.join(' '); }
+    done.push(`Removed: "${h.b}"`);
+  }
+}
+
+function replaceText(cv, from, to, done, unclear, raw) {
+  const low = from.toLowerCase();
+  const swap = (s) => { const k = s.toLowerCase().indexOf(low); return k < 0 ? null : s.slice(0, k) + to + s.slice(k + from.length); };
+  for (const x of cv.experience) for (let j = 0; j < x.bullets.length; j++) {
+    const n = swap(x.bullets[j]);
+    if (n !== null) { x.bullets[j] = n; done.push(`Changed a point under ${x.role || x.company}: "${n}"`); return; }
+  }
+  for (const p of cv.projects) for (let j = 0; j < (p.bullets || []).length; j++) {
+    const n = swap(p.bullets[j]);
+    if (n !== null) { p.bullets[j] = n; p.desc = p.bullets.join(' '); done.push(`Changed a point in ${p.name}: "${n}"`); return; }
+  }
+  // job titles, companies and dates; schools, degrees and certifications
+  for (const x of cv.experience) for (const key of ['role', 'company', 'period', 'location']) {
+    const n = swap(x[key] || '');
+    if (n !== null) { x[key] = n; done.push(`Changed "${from}" to "${to}" in ${key === 'company' ? 'the company name' : `the job's ${key === 'role' ? 'title' : key}`}`); return; }
+  }
+  for (const e of cv.education) for (const key of ['degree', 'school', 'period']) {
+    const n = swap(e[key] || '');
+    if (n !== null) { e[key] = n; done.push(`Changed "${from}" to "${to}" in your education`); return; }
+  }
+  for (let j = 0; j < cv.certifications.length; j++) {
+    const n = swap(cv.certifications[j]);
+    if (n !== null) { cv.certifications[j] = n; done.push(`Changed a certification to "${n}"`); return; }
+  }
+  for (const key of ['summary', 'headline', 'location']) {
+    const n = swap(cv[key] || '');
+    if (n !== null) { cv[key] = n; done.push(`Changed your ${key}`); return; }
+  }
+  unclear.push(`${raw} (couldn't find "${from}" on the CV)`);
+}
+
+// "Add realistic achievements / numbers": every point without a number becomes a measured
+// achievement right away, with a typical, modest estimate for that kind of work (marked ~).
+const NUMBER_DRAFTS = [
+  [/\b(test(s|ing)?|jest|cypress|pytest|qa)\b/i, 'reaching ~80% test coverage'],
+  [/\b(open[- ]source|starter kit|sdk|npm package)\b/i, 'used by ~200 developers'],
+  [/\b(state management|redux|zustand|context api|accessibility|responsive)\b/i, 'cutting UI bugs by ~25%'],
+  [/\b(payments?|checkout|billing|orders?|transactions?|invoic\w*|stripe)\b/i, 'handling ~10,000 transactions a month'],
+  [/\b(ci\/cd|pipelines?|deploy\w*|releases?|github actions|gitlab ci|docker|kubernetes)\b/i, 'cutting release time by ~40%'],
+  [/\b(performance|optimi[sz]\w*|latency|faster|speed|load(ing)? time|lighthouse|caching|cache|index\w*|quer(y|ies))\b/i, 'improving response times by ~30%'],
+  [/\b(monitor\w*|observability|logging|alert\w*|sentry|grafana|datadog|prometheus)\b/i, 'cutting incident resolution time by ~35%'],
+  [/\b(automat\w*|scripts?|workflows?)\b/i, 'saving the team ~10 hours a week'],
+  [/\b(mentor\w*|led|lead|team|coach\w*|review\w*)\b/i, 'across a team of ~5 engineers'],
+  [/\b(data|etl|elt|reports?|analytics|warehouse|spark|airflow)\b/i, 'processing ~1M records a day'],
+  [/\b(apis?|services?|backend|microservices?|endpoints?|server)\b/i, 'handling ~100K requests a day'],
+  [/\b(dashboards?|ui|interfaces?|frontend|front-end|pages?|sites?|website|app|apps|screens?|components?)\b/i, 'used by ~5,000 users'],
+  [/\b(security|auth\w*|permissions?|compliance)\b/i, 'protecting ~10,000 user accounts']
+];
+const DEFAULT_DRAFT = 'improving delivery speed by ~20%';
+
+/** Points without a number, each with a measured version: [{ original, suggested }]. */
+// A point with a measured result: its vague ending ("…, enabling reliable releases", "… to
+// ensure quality") makes way for a typical result for that kind of work (marked ~)
+function measuredVersion(b) {
+  const clause = (NUMBER_DRAFTS.find(([re]) => re.test(b)) || [null, DEFAULT_DRAFT])[1];
+  const core = b.replace(/[.\s]+$/, '')
+    .replace(/,\s*(?:and\s+)?(?:enabling|improving|ensuring|supporting|delivering|helping|collaborating|maintaining|increasing|allowing|providing|making|resulting|driving|leading to|which|while)\b[^,]*$/i, '')
+    .replace(/\s+(?:to|in order to)\s+(?:ensure|improve|support|enable|deliver|help|maintain|provide|allow|accelerate|keep)\b[^,]*$/i, '');
+  // "across a team of …" reads as part of the sentence, without a comma
+  return /^across\b/.test(clause) ? `${core} ${clause}.` : `${core}, ${clause}.`;
+}
+
+export function draftNumbers(cv) {
+  const points = [
+    ...cv.experience.flatMap(x => x.bullets),
+    ...cv.projects.flatMap(p => (p.bullets && p.bullets.length ? p.bullets : [p.desc].filter(Boolean)))
+  ];
+  // Only achievements (points that start with what was done), not descriptions
+  return points.filter(b => b && !hasMeasure(b) && hasAction(b)).map(b => ({ original: b, suggested: measuredVersion(b) }));
+}
+
+/** "Improve the points": stronger openers, tighter wording, a measured result, results first. */
+function improvePoints(cv, jobs) {
+  let changed = 0;
+  for (const x of jobs) {
+    x.bullets = x.bullets.map(b => {
+      let t = polishBullet(b);
+      if (!hasAction(t)) t = `Delivered ${t[0].toLowerCase()}${t.slice(1)}`;
+      if (words(t) > 28) t = `${t.replace(/[.\s]+$/, '').replace(VAGUE_ENDING, '')}.`;
+      if (!hasMeasure(t)) t = measuredVersion(t);
+      if (t !== b) changed++;
+      return t;
+    });
+    x.bullets = [...x.bullets].sort((a, c) => Number(hasMeasure(c)) - Number(hasMeasure(a)));
+  }
+  return changed;
+}
+
+// Certifications that fit the skills a job asks for (named in replies; added only by name)
+const CERTIFICATIONS_FOR = {
+  AWS: 'AWS Certified Developer – Associate', Azure: 'Microsoft Certified: Azure Developer Associate', GCP: 'Google Cloud Professional Cloud Developer',
+  Kubernetes: 'Certified Kubernetes Application Developer (CKAD)', Terraform: 'HashiCorp Certified: Terraform Associate', Docker: 'Docker Certified Associate (DCA)',
+  Python: 'PCAP – Certified Associate Python Programmer', Agile: 'Professional Scrum Master I (PSM I)', Security: 'CompTIA Security+',
+  Snowflake: 'SnowPro Core Certification', Databricks: 'Databricks Certified Data Engineer Associate', MongoDB: 'MongoDB Associate Developer'
+};
+
+// Shorter points: the vague ending goes ("…, enabling reliable releases with minimal downtime")
+const VAGUE_ENDING = /,\s*(?:and\s+)?(?:enabling|improving|ensuring|supporting|delivering|helping|collaborating|maintaining|increasing|allowing|providing|making|resulting|driving|leading to|which|while)\b[^,]*$|\s+(?:to|in order to)\s+(?:ensure|improve|support|enable|deliver|help|maintain|provide|allow|accelerate|keep)\b[^,]*$/i;
+
+// "Senior Engineer at Acme (2019 – 2021)" / "Senior Engineer | Acme | 2019 – 2021"
+function parseJob(text) {
+  const t = String(text).trim();
+  let m = t.split(/\s*\|\s*/);
+  if (m.length >= 2) return { role: m[0], company: m[1], period: m[2] || '', location: m[3] || '', bullets: [] };
+  m = t.match(/^(.+?)\s+(?:at|@|with)\s+(.+?)(?:\s*[,(]\s*([^()]*\d{4}[^()]*)\)?)?$/i);
+  return m ? { role: m[1].trim(), company: m[2].trim().replace(/,$/, ''), period: (m[3] || '').trim(), location: '', bullets: [] } : null;
+}
+
+// Everyday wording around a request ("Can you please…", "I want to…", "… thanks") is set
+// aside, and a few synonyms become the words the rules know
+function normalizeRequest(text) {
+  let t = String(text).replace(/\s+/g, ' ').trim();
+  const lead = /^(?:please|pls|kindly|can you|could you|would you|will you|i want you to|i'd like you to|i would like you to|i need you to|i want to|i'd like to|i would like to|i need to|let's|lets|go ahead and|now|also|and|then|just|ok(?:ay)?|so)[,\s]+/i;
+  for (let i = 0; i < 6 && lead.test(t); i++) t = t.replace(lead, '');
+  t = t.replace(/[,\s]*(?:please|pls|thanks|thank you)[.!]*$/i, '').replace(/[!]+$/, '')
+    .replace(/^i\s+(?:want|need|would like|'d like)\s+(?=(?:my|the)\s)/i, '')
+    // "make it look nicer / cleaner / more professional" -> tidy and organize
+    .replace(/^make\s+(?:it|the cv|my cv|my resume|this)\s+(?:look\s+|read\s+)?(?:nicer|cleaner|better|neater|more professional|more polished|tidier)$/i, 'organize my cv')
+    .replace(/^(?:get rid of|take out|take off|erase|cut out|delete|drop)\s+/i, 'remove ')
+    .replace(/^(?:insert|include|put|list)\s+/i, 'add ')
+    // "mention that I mentored 3 juniors" -> "I mentored 3 juniors"
+    .replace(/^(?:mention|say|write|note|show|state|add)\s+(?:that\s+)?(?=i\s)/i, '')
+    // "say that at Brightloop I …" -> "at Brightloop I …"
+    .replace(/^(?:mention|say|write|note|state)\s+that\s+/i, '')
+    // "mention in my Brightloop job that I …" -> "under Brightloop add: I …"
+    .replace(/^(?:mention|say|write|note|state|add)\s+(?:in|at|for|under)\s+(?:my\s+|the\s+)?(.+?)\s+(?:job|role|position|experience)?\s*that\s+(.+)$/i, 'under $1 add: $2');
+  return t;
+}
+
+// Two requests in one sentence: "… and mention that I know Kafka", "…, then remove PHP"
+const splitRequests = (line) => line.split(/\s*,?\s+(?:and then|and also|then)\s+|\s*,?\s+and\s+(?=(?:add|remove|delete|change|replace|set|make|put|mention|include|get rid of|update)\b)/i).filter(Boolean);
+
+const CONTACT_FIELD = { phone: 'phone', 'phone number': 'phone', mobile: 'phone', email: 'email', 'email address': 'email', location: 'location', city: 'location', address: 'location', linkedin: 'linkedin', github: 'github' };
+
+/**
+ * Apply plain instructions to a CV. One instruction per line (or separated by ";").
+ * @returns {{ cv: any, done: string[], unclear: string[], skills: string[], pending: string[] }}
+ */
+export function applyInstructions(input, text, { whole = false } = {}) {
+  const cv = normalizeCV(input);
+  const done = [], unclear = [], skills = [];
+  // (whole: one command as written, e.g. from the local model, whose text may contain ";")
+  const lines = whole ? [String(text || '').replace(CONTROL_CHARS, '').trim()].filter(Boolean)
+    : String(text || '').replace(CONTROL_CHARS, '').split(/\n+|;\s*(?=[A-Za-z])/).map(l => l.trim().replace(/^[-•*\d.)\s]+(?=[A-Za-z"“])/, '')).filter(Boolean)
+      .flatMap(splitRequests).slice(0, 25);
+  for (const raw of lines) {
+    const line = normalizeRequest(raw);
+    let m;
+    // "Add realistic achievements / numbers / metrics": applied to every point without a number
+    if (!/["“]/.test(line) && !/^(?:remove|delete|drop)\b/i.test(line)
+      && /\b(?:numbers?|metrics?|achievements?|accomplishments?|figures|quantif\w*|measurable|measured)\b/i.test(line)) {
+      const list = draftNumbers(cv);
+      for (const d of list) {
+        let placed = false;
+        for (const x of cv.experience) { const j = x.bullets.indexOf(d.original); if (j >= 0) { x.bullets[j] = d.suggested; placed = true; break; } }
+        if (!placed) for (const p of cv.projects) {
+          p.bullets = p.bullets && p.bullets.length ? p.bullets : [p.desc].filter(Boolean);
+          const j = p.bullets.indexOf(d.original);
+          if (j >= 0) { p.bullets[j] = d.suggested; p.desc = p.bullets.join(' '); placed = true; break; }
+        }
+        if (placed) done.push(`Achievement: "${d.suggested}"`);
+      }
+      if (list.length) done.unshift(`Turned ${list.length} point${list.length > 1 ? 's' : ''} into measured achievements (estimates marked ~; change any number with Replace "…" with "…")`);
+      else done.push('Every point already has a number');
+      // the line may also ask for certifications
+      if (!/\b(?:certifications?|certificates?|certs?)\b/i.test(line)) continue;
+    }
+    // A general "add certifications": certifications are added only by name
+    if (!/["“:]/.test(line) && /\b(?:certifications?|certificates?|certs?)\b/i.test(line) && !/^(?:remove|delete|drop)\b/i.test(line)
+      && !/^add\s+.+\s+(?:to|in|under|into)\s+(?:my\s+|the\s+)?certifications?\b/i.test(line)) {
+      const fits = [...new Set(Object.entries(CERTIFICATIONS_FOR).filter(([k]) => countMatches(TERMS.find(t => t.name === k)?.re || /$^/, JSON.stringify(cv)) > 0).map(([, v]) => v))].slice(0, 4);
+      unclear.push(`${raw} (certifications are only added by name, so the CV stays true. Write e.g. "Add certification: ${fits[0] || 'AWS Certified Developer – Associate'}" for each one you hold${fits.length > 1 ? `; ones that fit this CV: ${fits.join(', ')}` : ''})`);
+      continue;
+    }
+    // Replace "old" with "new"
+    if ((m = line.match(/^(?:replace|change|swap)\s+["“'](.+?)["”']\s+(?:with|to|for|by|into)\s+["“'](.+?)["”']\.?$/i))) { replaceText(cv, m[1], m[2], done, unclear, raw); continue; }
+    // Contact details
+    if ((m = line.match(/^(?:add|set|change|update|put)\s+(?:my\s+)?(phone number|phone|mobile|email address|email|location|city|address|linkedin|github)\s*(?:to|as|:|is|=)?\s*(.+)$/i))) {
+      const field = CONTACT_FIELD[m[1].toLowerCase()];
+      cv[field] = m[2].trim().replace(/[.]$/, '');
+      done.push(`Set your ${m[1].toLowerCase()} to ${cv[field]}`);
+      continue;
+    }
+    // "headline: …", "summary: …", "phone: …"
+    if ((m = line.match(/^(headline|title|summary|phone(?: number)?|mobile|email|location|linkedin|github)\s*[:=]\s*(.+)$/i))
+      || (m = line.match(/^(phone(?: number)?|mobile)\s+(\+?[\d][\d\s()-]{6,})$/i))
+      || (m = line.match(/^(email)\s+(\S+@\S+)$/i))
+      || (m = line.match(/^(linkedin|github)\s+(\S*(?:linkedin|github)\.com\S*)$/i))) {
+      const key = m[1].toLowerCase();
+      const value = m[2].trim().replace(/^["“']|["”']$/g, '');
+      if (key === 'headline' || key === 'title') { cv.headline = value.replace(/[.]$/, ''); done.push(`Changed your headline to "${cv.headline}"`); }
+      else if (key === 'summary') { cv.summary = value; done.push('Replaced your summary'); }
+      else { const field = CONTACT_FIELD[key]; cv[field] = value.replace(/[.]$/, ''); done.push(`Set your ${key} to ${cv[field]}`); }
+      continue;
+    }
+    if ((m = line.match(/^(?:make\s+)?my\s+(headline|title)\s+(?:should\s+(?:be|say|read)|to\s+(?:be|say|read)|will\s+be|is|=|as)\s+(.+)$/i)) || (m = line.match(/^make\s+my\s+(headline|title)\s+(.+)$/i))) {
+      cv.headline = m[2].trim().replace(/^["“']|["”'.]$/g, '');
+      done.push(`Changed your headline to "${cv.headline}"`);
+      continue;
+    }
+    if (/\b(?:more\s+senior|sound\s+senior|senior[- ]level|seniority)\b/i.test(line) && !/\bunder\b|:/.test(line)) {
+      if (/\b(senior|lead|principal|staff|head|chief)\b/i.test(cv.headline)) done.push(`Your headline already reads senior: "${cv.headline}"`);
+      else { cv.headline = `Senior ${cv.headline || (cv.experience[0] && cv.experience[0].role) || 'Engineer'}`.trim(); done.push(`Changed your headline to "${cv.headline}"`); }
+      continue;
+    }
+    // "The point about Celery should mention it handled 1M tasks a day", "add 1M tasks a day to the point about Celery"
+    if ((m = line.match(/^(?:make\s+)?(?:the\s+|my\s+)?(?:point|bullet|line)\s+(?:about|on|with|mentioning)\s+(.+?)\s+(?:should\s+|to\s+|must\s+|needs?\s+to\s+)?(?:say|mention|include|show|state|add|note)s?\s+(?:that\s+)?(?:it\s+|we\s+|i\s+)?(.+)$/i))
+      || ((m = line.match(/^add\s+(.+?)\s+to\s+(?:the\s+|my\s+)?(?:point|bullet|line)\s+(?:about|on|with)\s+(.+)$/i)) && (m = [m[0], m[2], m[1]]))) {
+      const key = m[1].toLowerCase().replace(/[."]/g, '').trim();
+      let extra = m[2].trim().replace(/[.!]+$/, '');
+      const v = extra.match(/^([a-z]+)\b/i);
+      if (v && PAST_TO_GERUND[v[1].toLowerCase()]) extra = PAST_TO_GERUND[v[1].toLowerCase()] + extra.slice(v[0].length);
+      else if (v && GERUND_PAST[`${v[1].toLowerCase()}ing`] === undefined && /ed$/i.test(v[1])) extra = `${v[1].replace(/ed$/i, 'ing')}${extra.slice(v[0].length)}`;
+      const hits = [];
+      cv.experience.forEach((x, i) => x.bullets.forEach((b, j) => { if (b.toLowerCase().includes(key)) hits.push({ x, j }); }));
+      // several points mention it: the first one, in the most recent job (Undo is one click away)
+      if (hits.length) {
+        const { x, j } = hits[0];
+        x.bullets[j] = `${x.bullets[j].replace(/[.\s]+$/, '')}, ${extra}.`;
+        done.push(`Changed a point under ${x.role || x.company}: "${x.bullets[j]}"`);
+      } else unclear.push(`${raw} (no point mentions "${m[1]}")`);
+      continue;
+    }
+    // "sound more like a team lead" -> headline
+    if ((m = line.match(/\b(?:sound|look|read)\s+(?:more\s+)?like\s+(?:a\s+|an\s+)?(team lead|tech lead|lead|manager|principal|staff|architect|head)\b/i))) {
+      const word = { 'team lead': 'Lead', 'tech lead': 'Lead', lead: 'Lead', manager: 'Lead', principal: 'Principal', staff: 'Staff', architect: 'Lead', head: 'Lead' }[m[1].toLowerCase()];
+      const role = String(cv.headline || (cv.experience[0] && cv.experience[0].role) || 'Engineer').replace(/^(?:senior|sr\.?|junior|jr\.?|lead|principal|staff)\s+/i, '');
+      cv.headline = `${word} ${role}`;
+      done.push(`Changed your headline to "${cv.headline}"`);
+      continue;
+    }
+    // "My phone is …", "My email is …", "I'm based in …"
+    if ((m = line.match(/^(?:my\s+)?(phone number|phone|mobile|email address|email|linkedin|github)\s+(?:is|=|:)\s*(.+)$/i))) {
+      const field = CONTACT_FIELD[m[1].toLowerCase()];
+      cv[field] = m[2].trim().replace(/[.]$/, '');
+      done.push(`Set your ${m[1].toLowerCase()} to ${cv[field]}`);
+      continue;
+    }
+    if ((m = line.match(/^i(?:'m| am)?\s+(?:live|living|based|located|now based|now living)\s+in\s+(.+)$/i))) { cv.location = m[1].trim().replace(/[.]$/, ''); done.push(`Set your location to ${cv.location}`); continue; }
+    // A job: its title, company or dates, or the whole job
+    if ((m = line.match(/^(?:change|set|rename|update)\s+(?:my\s+)?(?:title|role|job title|position)\s+(?:at|in|for|with)\s+(.+?)\s+(?:to|as)\s+(.+)$/i))) {
+      const place = findPlace(cv, m[1]);
+      if (place && place.kind === 'exp') { cv.experience[place.i].role = m[2].trim().replace(/^["“']|["”'.]$/g, ''); done.push(`Changed your title at ${cv.experience[place.i].company || m[1]} to "${cv.experience[place.i].role}"`); }
+      else unclear.push(`${raw} (no job at "${m[1]}" on the CV)`);
+      continue;
+    }
+    if ((m = line.match(/^(?:change|set|update)\s+(?:the\s+|my\s+)?(?:dates?|period|years?)\s+(?:at|for|of|with)\s+(.+?)\s+to\s+(.+)$/i))) {
+      const place = findPlace(cv, m[1]);
+      if (place && place.kind === 'exp') { cv.experience[place.i].period = m[2].trim().replace(/[.]$/, ''); done.push(`Changed the dates at ${cv.experience[place.i].company || m[1]} to ${cv.experience[place.i].period}`); }
+      else unclear.push(`${raw} (no job at "${m[1]}" on the CV)`);
+      continue;
+    }
+    if ((m = line.match(/^(?:rename|change)\s+(?:the\s+)?company\s+(.+?)\s+to\s+(.+)$/i))) {
+      const place = findPlace(cv, m[1]);
+      if (place && place.kind === 'exp') { const was = cv.experience[place.i].company; cv.experience[place.i].company = m[2].trim().replace(/[.]$/, ''); done.push(`Renamed ${was} to ${cv.experience[place.i].company}`); }
+      else unclear.push(`${raw} (no company "${m[1]}" on the CV)`);
+      continue;
+    }
+    if ((m = line.match(/^(?:remove|delete|drop|take out)\s+(?:the\s+|my\s+)?(?:job|role|position|experience)\s+(?:at|with|from|in)\s+(.+)$/i))) {
+      const place = findPlace(cv, m[1]);
+      if (place && place.kind === 'exp') { const [x] = cv.experience.splice(place.i, 1); done.push(`Removed the job ${[x.role, x.company].filter(Boolean).join(' at ')}`); }
+      else unclear.push(`${raw} (no job at "${m[1]}" on the CV)`);
+      continue;
+    }
+    if ((m = line.match(/^add\s+(?:a\s+|another\s+|my\s+)?(?:job|role|position|experience)\s*:?\s*(.+)$/i)) && parseJob(m[1])) {
+      const job = parseJob(m[1]);
+      const year = (job.period.match(/\d{4}/g) || []).map(Number).pop() || 0;
+      const at = cv.experience.findIndex(x => Math.max(0, ...((x.period.match(/\d{4}/g) || []).map(Number)), /present|current/i.test(x.period) ? 9999 : 0) < year);
+      if (at < 0) cv.experience.push(job); else cv.experience.splice(at, 0, job);
+      done.push(`Added the job ${[job.role, job.company].filter(Boolean).join(' at ')}${job.period ? ` (${job.period})` : ''}. Add its points with "Under ${job.company || job.role} add: …"`);
+      continue;
+    }
+    // A project: "Add project: ShipFast - Next.js starter kit used by 200 developers"
+    if ((m = line.match(/^add\s+(?:a\s+|my\s+)?project\s*:?\s*(.+?)(?:\s*(?:\s[-–—]\s|:|\|)\s*(.+))?$/i))) {
+      const desc = m[2] ? cleanPoint(m[2]) : '';
+      cv.projects.unshift({ name: m[1].trim(), desc, bullets: desc ? [desc] : [], tech: TERMS.filter(t => desc && countMatches(t.re, desc) > 0 && t.category !== 'Ways of Working').map(t => t.name).slice(0, 4) });
+      done.push(`Added the project ${m[1].trim()}`);
+      continue;
+    }
+    // "Improve the points of experience", "make my Brightloop points stronger"
+    if (!/\bsummary\b|\bheadline\b|\btitle\b/i.test(line)
+      && /^(?:improve|strengthen|enhance|polish|optimi[sz]e|refine|upgrade|tighten|boost|rework|redo|rewrite|better)\b|^make\b.*\b(?:better|stronger|more impactful|more professional|sharper|punchier)\b/i.test(line)
+      && /\b(?:points?|bullets?|experiences?|achievements?|work history|jobs?|roles?|cv|resume|it|everything)\b/i.test(line)) {
+      const named = cv.experience.filter(x => x.company && x.company.length >= 3 && new RegExp(`\\b${escapeRe(x.company)}\\b`, 'i').test(line));
+      const jobs = named.length ? named : cv.experience;
+      const n = improvePoints(cv, jobs);
+      done.push(n ? `Improved ${n} point${n > 1 ? 's' : ''}${named.length ? ` at ${joinList(named.map(x => x.company))}` : ''}: stronger openers, tighter wording and a measured result in each (estimates are marked ~; change them to your real numbers)` : 'Your points are already strong: action verbs, concise and measured');
+      continue;
+    }
+    // "Organize / tidy up my CV": in each job, measured results first; skills without repeats
+    if (/^(?:re-?organi[sz]e|organi[sz]e|tidy(?: up)?|clean(?: up)?|sort|arrange|fix the order of)\b/i.test(line) && /\b(cv|resume|points?|bullets?|experience|it|everything|skills?)\b|^(?:re-?organi[sz]e|organi[sz]e|tidy(?: up)?|clean(?: up)?)$/i.test(line)) {
+      let moved = 0;
+      const order = (list) => { const sorted = [...list].sort((a, b) => Number(hasMeasure(b)) - Number(hasMeasure(a))); moved += sorted.filter((x, i) => x !== list[i]).length ? 1 : 0; return sorted; };
+      for (const x of cv.experience) x.bullets = order(x.bullets);
+      for (const g of cv.skills) { const seen = new Set(); g.items = g.items.filter(i => { const k = i.name.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }); }
+      done.push(moved ? `Organized your CV: in ${moved} job${moved > 1 ? 's' : ''} the measured results now come first` : 'Your CV is already organized');
+      continue;
+    }
+    // Shorter summary / points / CV
+    if (/\b(?:shorten|shorter|trim|cut down|condense|concise|tighten|reduce)\b/i.test(line) && /\bsummary\b/i.test(line)) {
+      const parts = cv.summary.split(/(?<=[.!?])\s+(?=[A-Z])/);
+      if (parts.length > 2) { cv.summary = parts.slice(0, 2).join(' '); done.push('Shortened your summary to its first two sentences'); }
+      else done.push('Your summary is already short');
+      continue;
+    }
+    if (/\b(?:shorten|shorter|trim|condense|concise|tighten)\b/i.test(line) && /\b(?:points?|bullets?|lines|experience)\b/i.test(line)) {
+      let n = 0;
+      const tidy = (b) => { if (words(b) <= 22) return b; const c = b.replace(/[.\s]+$/, '').replace(VAGUE_ENDING, ''); if (c !== b.replace(/[.\s]+$/, '')) { n++; return `${c}.`; } return b; };
+      for (const x of cv.experience) x.bullets = x.bullets.map(tidy);
+      for (const p of cv.projects) if (p.bullets && p.bullets.length) { p.bullets = p.bullets.map(tidy); p.desc = p.bullets.join(' '); }
+      done.push(n ? `Shortened ${n} long point${n > 1 ? 's' : ''} by dropping their vague endings` : 'No point had a vague ending to drop');
+      continue;
+    }
+    if (/\b(?:one|1|single)[\s-]page\b|\bshorter cv\b|\bshorten (?:the |my )?cv\b|\bmake (?:the |my )?cv shorter\b/i.test(line)) {
+      const caps = [4, 4, 4, 4];
+      let cut = 0;
+      cv.experience.forEach((x, i) => { const cap = caps[i] ?? 2; if (x.bullets.length > cap) { cut += x.bullets.length - cap; x.bullets = x.bullets.slice(0, cap); } });
+      if (cv.projects.length > 2) { cut += cv.projects.length - 2; cv.projects = cv.projects.slice(0, 2); }
+      const parts = cv.summary.split(/(?<=[.!?])\s+(?=[A-Z])/);
+      if (parts.length > 3) cv.summary = parts.slice(0, 3).join(' ');
+      done.push(cut ? `Made the CV shorter: kept the strongest points in each job (removed ${cut} lines)` : 'The CV is already short');
+      continue;
+    }
+    // Headline
+    if ((m = line.match(/^(?:change|set|make|update|use)\s+(?:my\s+|the\s+)?(?:headline|title|job title)\s*(?:to|as|:|=)\s*(.+)$/i))) { cv.headline = m[1].trim().replace(/^["“']|["”'.]$/g, ''); done.push(`Changed your headline to "${cv.headline}"`); continue; }
+    // Summary
+    // ("…summary to highlight backend work" is a request about the summary, not its new text)
+    if ((m = line.match(/^(?:change|set|replace|update|rewrite)\s+(?:my\s+|the\s+)?summary\s*(?:to|with|as)?\s*:?\s*(.+)$/i))
+      && !/^(?:focus|highlight|emphasi[sz]e|mention|include|be|sound|show|talk|say|reflect|cover|stress|feature|lead|read|look|more|less|better|shorter|longer|make)\b/i.test(m[1])) { cv.summary = m[1].trim().replace(/^["“']|["”']$/g, ''); done.push('Replaced your summary'); continue; }
+    if ((m = line.match(/^add\s+(?:(?:a\s+)?(?:line|sentence)\s+)?to\s+(?:my\s+|the\s+)?summary\s*:?\s*(.+)$/i))) { const add = cleanPoint(m[1]); cv.summary = `${cv.summary.trim()} ${add}`.trim(); done.push(`Added to your summary: "${add}"`); continue; }
+    // Skills
+    if ((m = line.match(/^(?:add|include)\s+(?:these\s+|the\s+|my\s+)?(?:skills?|tools?|technolog(?:y|ies)|tech)\s*:?\s*(.+)$/i)) || (m = line.match(/^(?:add|include)\s+(.+?)\s+(?:to|in)\s+(?:my\s+|the\s+)?skills(?:\s+section)?\.?$/i))) { addSkills(cv, m[1], done, skills); continue; }
+    // Certifications and education
+    if ((m = line.match(/^add\s+(?:a\s+|my\s+)?(?:certification|certificate|cert)\s*:?\s*(.+)$/i))) { cv.certifications.push(m[1].trim().replace(/[.]$/, '')); done.push(`Added the certification "${m[1].trim().replace(/[.]$/, '')}"`); continue; }
+    if ((m = line.match(/^add\s+(?:a\s+|my\s+)?(?:degree|education)\s*:?\s*(.+)$/i))) {
+      const parts = m[1].split(/\s*[|]\s*|\s*,\s*/).map(x => x.trim());
+      cv.education.push({ degree: parts[0] || '', school: parts[1] || '', period: parts[2] || '' });
+      done.push(`Added education: ${parts.filter(Boolean).join(', ')}`);
+      continue;
+    }
+    // Remove something
+    if ((m = line.match(/^(?:remove|delete|drop|take out|get rid of)\s+(.+)$/i))) {
+      const target = m[1].replace(/\s+from\s+(?:my\s+|the\s+)?(?:skills?|cv|resume|summary|experience|section|list|[A-Z][\w.&-]*(?:\s+[A-Z][\w.&-]*)*)(?:\s+(?:job|role|section|list))?\.?$/, '');
+      removeThing(cv, target, done, unclear, raw);
+      continue;
+    }
+    // Add a point: "Add a point under Brightloop: …", "Under Brightloop, add: …", "Add a point: …"
+    if ((m = line.match(/^(?:add|include|put|write)\s+(?:a\s+|this\s+|the\s+|one\s+)?(?:new\s+)?(?:point|bullet|line|achievement|experience)?\s*(?:under|to|in|for|at|into)\s+(.+?)\s*(?::|\s-\s|\s–\s|\s—\s|,\s*(?:that|saying)?\s*|\s+that\s+|\s+saying\s+)\s*(.+)$/i))
+      || (m = line.match(/^(?:under|in|at|for)\s+(.+?)\s*[,:]?\s+(?:add|include|write)\s*(?:a\s+)?(?:point|bullet|line)?\s*:?\s*(.+)$/i))) {
+      const place = findPlace(cv, m[1]);
+      if (place) addPoint(cv, place, m[2], done);
+      else unclear.push(`${raw} (no job or project called "${m[1]}" on the CV)`);
+      continue;
+    }
+    if ((m = line.match(/^add\s+(?:a\s+|another\s+|one\s+)?(?:new\s+)?(?:point|bullet|line|achievement)\s*:?\s*(.+)$/i))) {
+      if (cv.experience.length) addPoint(cv, { kind: 'exp', i: 0 }, m[1], done); else unclear.push(raw);
+      continue;
+    }
+    // "Replace 40,000 with 45,000", "change Paywise to Paywise Ltd" (no quotes)
+    if ((m = line.match(/^(?:replace|change|swap|update|edit)\s+(.+?)\s+(?:with|to|into|by)\s+(.+)$/i))) {
+      replaceText(cv, m[1].trim().replace(/^["“']|["”']$/g, ''), m[2].trim().replace(/^["“']|["”']$/g, '').replace(/[.]$/, ''), done, unclear, raw);
+      continue;
+    }
+    // "Add Kafka", "add mentored 3 juniors to my Brightloop job", "add X to my summary"
+    if ((m = line.match(/^add\s+(.+)$/i))) {
+      const body = m[1].trim();
+      // split at the last "to / under / in …" ("code reviews for 6 engineers to Paywise")
+      const tail = body.match(/^(.+)\s+(?:under|to|in|into|for|at)\s+(?:my\s+|the\s+)?(.+?)(?:\s+(?:job|role|position|section|experience|list))?\.?$/i);
+      if (tail && /^skills?$/i.test(tail[2])) { addSkills(cv, tail[1], done, skills); continue; }
+      if (tail && /^summary$/i.test(tail[2])) { const a = cleanPoint(tail[1]); cv.summary = `${cv.summary.trim()} ${a}`.trim(); done.push(`Added to your summary: "${a}"`); continue; }
+      if (tail && /^certifications?$/i.test(tail[2])) { cv.certifications.push(tail[1].replace(/[.]$/, '')); done.push(`Added the certification "${tail[1].replace(/[.]$/, '')}"`); continue; }
+      const place = tail && findPlace(cv, tail[2]);
+      if (place) { addPoint(cv, place, tail[1], done); continue; }
+      const items = body.split(/\s*(?:,|;|\band\b|&)\s*/i).filter(Boolean);
+      if (items.every(it => TERMS.some(t => t.name.toLowerCase() === skillName(it).toLowerCase()))) { addSkills(cv, body, done, skills); continue; }
+      if (cv.experience.length && body.split(/\s+/).length >= 4) { addPoint(cv, { kind: 'exp', i: 0 }, body, done); continue; }
+    }
+    // Plain sentence about a job on the CV: "At Brightloop I migrated 12 services to Kubernetes"
+    const named = cv.experience.findIndex(x => x.company && x.company.length >= 3 && new RegExp(`\\b${escapeRe(x.company)}\\b`, 'i').test(line));
+    if (named >= 0) {
+      const company = escapeRe(cv.experience[named].company);
+      const rest = line
+        .replace(new RegExp(`^(?:at|in|for|with|while at|during my time at|when i was at|when i worked at)\\s+(?:my\\s+|the\\s+)?${company}(?:\\s+(?:job|role|position|team))?\\s*,?\\s*`, 'i'), '')
+        .replace(new RegExp(`\\s+(?:at|in|for|with)\\s+(?:my\\s+|the\\s+)?${company}(?:\\s+(?:job|role|position|team))?\\b`, 'i'), '');
+      addPoint(cv, { kind: 'exp', i: named }, rest, done);
+      continue;
+    }
+    // "Make my Kubernetes experience stand out", "highlight my AWS work": points about it go
+    // to the top of each job and the skill to the front of its group
+    if (!/\b(summary|headline|title|profile)\b/i.test(line)
+      && ((m = line.match(/^(?:my\s+)?(?:experience|work|skills?)\s+(?:with|in|on)\s+(.+?)\s+should\s+(?:stand out|be highlighted|come first|be more visible|be emphasi[sz]ed)(?:\s+more)?\.?$/i))
+        || (m = line.match(/^(?:highlight|emphasi[sz]e|feature|showcase|focus on|put (?:more )?focus on|bring out)\s+(?:my\s+)?(?:experience\s+(?:with|in)\s+|work\s+(?:with|in|on)\s+)?(.+?)(?:\s+(?:experience|work|skills?))?(?:\s+more)?\.?$/i))
+        || (m = line.match(/^make\s+(?:my\s+)?(.+?)\s+(?:experience|work|skills?)\s+stand out(?:\s+more)?\.?$/i)))) {
+      const key = skillName(m[1]).toLowerCase();
+      const term = TERMS.find(t => t.name.toLowerCase() === key);
+      const about = (t) => (term ? countMatches(term.re, t) > 0 : t.toLowerCase().includes(key));
+      let moved = 0;
+      for (const x of cv.experience) {
+        const top = x.bullets.filter(about);
+        if (top.length && x.bullets.indexOf(top[0]) > 0) moved++;
+        x.bullets = [...top, ...x.bullets.filter(b => !about(b))];
+      }
+      for (const g of cv.skills) { const hit = g.items.filter(i => i.name.toLowerCase() === key); if (hit.length) g.items = [...hit, ...g.items.filter(i => i.name.toLowerCase() !== key)]; }
+      const anyPoint = cv.experience.some(x => x.bullets.some(about));
+      if (anyPoint) done.push(`Put your ${skillName(m[1])} work first: ${moved ? `points about it now lead in ${moved} job${moved > 1 ? 's' : ''}` : 'it already leads'}, and ${skillName(m[1])} is first in its skill group`);
+      else unclear.push(`${raw} (no point mentions ${skillName(m[1])}; add one with "Under <job> add: …")`);
+      continue;
+    }
+    // "I don't use MongoDB anymore", "I no longer work with PHP": take the skill out
+    if ((m = line.match(/^i\s+(?:don'?t|do not|no longer|never|stopped|won'?t)\s+(?:use|using|know|work with|working with|want|list)\s+(.+?)(?:\s+(?:anymore|any more|now|these days|on my cv))?\.?$/i))) {
+      for (const item of m[1].split(/\s*(?:,|\band\b|&)\s*/i).filter(Boolean)) removeThing(cv, item, done, unclear, raw);
+      continue;
+    }
+    // "I also know Kafka and Go", "I have experience with Terraform": skills
+    if ((m = line.match(/^i\s+(?:also\s+)?(?:know|use|have used|have experience (?:with|in)|have worked with|am (?:good|skilled|experienced|proficient) (?:at|in|with)|can (?:use|work with))\s+(.+?)\.?$/i))) {
+      const items = m[1].split(/\s*(?:,|;|\band\b|&)\s*/i).filter(Boolean);
+      if (items.length && items.every(it => TERMS.some(t => t.name.toLowerCase() === skillName(it).toLowerCase()))) { addSkills(cv, m[1], done, skills); continue; }
+    }
+    // A sentence that starts with something done ("Built …", "I led …"): the latest job
+    // (past tense only: "make it nicer" is a request, not something done)
+    const first = (line.replace(/^(?:I|we)\s+(?:have\s+|also\s+)?/i, '').match(/^[A-Za-z-]+/) || [''])[0].toLowerCase().split('-').pop();
+    if (cv.experience.length && !WEAK_OPENERS.test(line) && (PAST_VERBS.has(first) || (/[a-z]{3,}ed$/.test(first) && !/eed$/.test(first)))) { addPoint(cv, { kind: 'exp', i: 0 }, line, done); continue; }
+    unclear.push(raw);
+  }
+  // the lines themselves (without notes), for a smarter pass when Claude is set up
+  const pending = lines.filter(l => unclear.some(u => u === l || u.startsWith(`${l} (`)));
+  return { cv, done, unclear, skills, pending };
 }
 
 /** One bullet against the XYZ formula: { x: action verb, y: measured result, z: method }. */
@@ -1364,7 +2140,10 @@ export function reviewCV(cv, { title = '', description = '' } = {}, profile, mat
       quantified,
       // Bullets without a number, most recent role first: the ones to improve
       needNumbers: bullets.filter(b => !b.y).slice(0, 6).map(b => ({ where: b.where, text: b.text, missing: [!b.x && 'action', 'measure', !b.z && 'method'].filter(Boolean) })),
-      rewrites: rewrites.slice(0, 8)
+      rewrites: rewrites.slice(0, 8),
+      // Points to rework, for the suggestions next to "Edit as text"
+      weak: weak.slice(0, 4).map(b => ({ where: b.where, text: b.text })),
+      long: long.slice(0, 4).map(b => ({ where: b.where, text: b.text, words: b.words }))
     },
     skim: { pages, sections }
   };

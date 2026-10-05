@@ -48,6 +48,7 @@ const tailorWs = cveWorkspace({
     }
     if (typeof renderTailorScore === 'function') renderTailorScore();
     if (typeof renderTailorReview === 'function') renderTailorReview();
+    if (typeof instructSync === 'function') instructSync();
     renderTailorPreview();
   }
 });
@@ -341,6 +342,7 @@ function cveLoadTailored(result) {
   tailorWs.result = result;
   tailorWs.layout = typeof tailorLayout !== 'undefined' ? tailorLayout : result.template;
   tailorWs.edited = false;
+  if (typeof instructLoaded === 'function') instructLoaded(result);
   renderStyleBar(tailorWs);
   if (!document.getElementById('tailor-edit-card').hidden) renderEditor(tailorWs);
 }
