@@ -1,7 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { resolveProfile, getProfileMarkdown } from '@/lib/profiles';
 import { tailorCV, renderTailoredCV, saveTailoredCV } from '@/lib/tailor.js';
-import { rewriteWithClaude, aiConfigured } from '@/lib/ai-tailor';
+import { rewriteWithClaude, rewriteWithCloud, aiConfigured } from '@/lib/ai-tailor';
+import { cloudAiConfigured } from '@/lib/cloud-llm.js';
 import { ROOT, usingDatabase } from '@/lib/store';
 
 export const dynamic = 'force-dynamic';
@@ -63,8 +64,9 @@ export async function POST(req: Request) {
         : `The ${profile.label} profile is still empty. Fill in its name and experience first.` }, { status: 422 });
     }
 
-    // Claude rewrites the selected content; if it can't, the rule-based CV is kept
-    const aiInfo: Record<string, unknown> = { configured: aiConfigured, used: false };
+    // Claude rewrites the selected content; without it, a free-tier cloud model (Groq or
+    // OpenRouter) when one is configured; if neither can, the rule-based CV is kept
+    const aiInfo: Record<string, unknown> = { configured: aiConfigured || cloudAiConfigured, used: false };
     if (ai !== false && aiConfigured) {
       try {
         const rewrite = await rewriteWithClaude({ base: result as any, profileMd, title: job.title, company: job.company, description: job.description, confirmed });
@@ -76,6 +78,18 @@ export async function POST(req: Request) {
       } catch (err) {
         console.error('Claude rewrite failed:', err);
         aiInfo.error = aiErrorMessage(err);
+      }
+    } else if (ai !== false && cloudAiConfigured) {
+      try {
+        const rewrite = await rewriteWithCloud({ base: result as any, profileMd, title: job.title, company: job.company, description: job.description, confirmed });
+        if (rewrite) {
+          const rendered = renderTailoredCV(rewrite.cv, job, profileMd, options);
+          result = { ...result, ...rendered, changes: [...rewrite.notes, ...result.changes.filter((c: string) => /confirmed/i.test(c))] };
+          Object.assign(aiInfo, { used: true, model: rewrite.model, rejected: rewrite.rejected });
+        }
+      } catch (err) {
+        console.error('Cloud rewrite failed:', err);
+        aiInfo.error = (err as Error)?.message || 'The cloud model could not rewrite this CV.';
       }
     }
     result.ai = aiInfo;

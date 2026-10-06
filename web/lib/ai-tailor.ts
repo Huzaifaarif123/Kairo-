@@ -16,8 +16,9 @@ import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
 import { parseProfile, stripComments, validateWholeCvEdit } from './tailor.js';
+import { cloudAiConfigured, chatJSON } from './cloud-llm.js';
 
-export const AI_MODEL = 'claude-opus-5-5';
+export const AI_MODEL = 'claude-sonnet-5-5';
 const TIMEOUT_MS = 50_000;
 
 export const aiConfigured = Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
@@ -77,7 +78,7 @@ function getClient(): Anthropic {
   return client;
 }
 
-async function requestRewrite(args: {
+function buildRewriteUserPrompt(args: {
   profileMd: string;
   title: string;
   company: string;
@@ -86,8 +87,8 @@ async function requestRewrite(args: {
   covered: string[];
   implied: string[];
   missing: string[];
-}): Promise<Rewrite> {
-  const user = `<job_posting>
+}): string {
+  return `<job_posting>
 Title: ${args.title || '(not given)'}
 Company: ${args.company || '(not given)'}
 
@@ -111,6 +112,34 @@ Skills the profile shows under another name (name them the way the posting does)
 Required skills the candidate does not have (never claim these): ${args.missing.join(', ') || '(none)'}
 
 Tailor the CV for this posting.`;
+}
+
+// Shared prep: the posting-vs-profile analysis both the Claude and cloud rewrite paths need
+function prepRewriteArgs(args: {
+  base: { cv: Cv; analysis: { matched: { name: string; required: boolean; implied?: string | null }[]; missing: { name: string; required: boolean }[] } };
+  profileMd: string;
+  confirmed: string[];
+}) {
+  const profile = parseProfile(args.profileMd);
+  const profileSkills: string[] = profile.skills.flatMap((g: { items: string[] }) => g.items);
+  const covered = args.base.analysis.matched.filter(m => m.required).map(m => m.name);
+  const implied = args.base.analysis.matched.filter(m => m.implied).map(m => `${m.name} (shown by ${m.implied})`);
+  const missing = args.base.analysis.missing.map(m => m.name);
+  const allowedSkills = [...profileSkills, ...args.confirmed, ...args.base.analysis.matched.map(m => m.name)];
+  return { covered, implied, missing, allowedSkills };
+}
+
+async function requestRewrite(args: {
+  profileMd: string;
+  title: string;
+  company: string;
+  description: string;
+  confirmed: string[];
+  covered: string[];
+  implied: string[];
+  missing: string[];
+}): Promise<Rewrite> {
+  const user = buildRewriteUserPrompt(args);
 
   const response = await getClient().beta.messages.parse({
     model: AI_MODEL,
@@ -213,17 +242,49 @@ export async function rewriteWithClaude(args: {
 }) {
   if (!aiConfigured) return null;
   const { base, profileMd, title, company, description, confirmed } = args;
-
-  const profile = parseProfile(profileMd);
-  const profileSkills: string[] = profile.skills.flatMap((g: { items: string[] }) => g.items);
-  const covered = base.analysis.matched.filter(m => m.required).map(m => m.name);
-  const implied = base.analysis.matched.filter(m => m.implied).map(m => `${m.name} (shown by ${m.implied})`);
-  const missing = base.analysis.missing.map(m => m.name);
+  const { covered, implied, missing, allowedSkills } = prepRewriteArgs({ base, profileMd, confirmed });
 
   const rewrite = await requestRewrite({ profileMd, title, company, description, confirmed, covered, implied, missing });
-  const allowedSkills = [...profileSkills, ...confirmed, ...base.analysis.matched.map(m => m.name)];
   const { cv, rejected } = mergeRewrite(base.cv, rewrite, profileMd, allowedSkills, missing);
   return { cv, notes: rewrite.notes.slice(0, 6), rejected, model: AI_MODEL };
+}
+
+const CLOUD_REWRITE_JSON_SHAPE = `Reply with ONLY a JSON object, no other text, shaped exactly like this:
+{"headline": "...", "tagline": ["...", ...6-8 items...], "summary": "...", "skills": [{"group": "...", "items": ["...", ...]}], "experience": [{"index": 0, "bullets": ["...", ...]}, ...one entry per role in the EXPERIENCE INDEX...], "notes": ["...", ...3-6 items...]}`;
+
+/**
+ * Same rewrite as rewriteWithClaude, using a free-tier cloud model (Groq or OpenRouter)
+ * instead — for when ANTHROPIC_API_KEY isn't set. Same honesty checks (mergeRewrite),
+ * same prompt content; only the JSON-shape instructions and transport differ, since these
+ * providers don't have Anthropic's structured-output schema enforcement.
+ */
+export async function rewriteWithCloud(args: {
+  base: { cv: Cv; analysis: { matched: { name: string; required: boolean; implied?: string | null }[]; missing: { name: string; required: boolean }[] } };
+  profileMd: string;
+  title: string;
+  company: string;
+  description: string;
+  confirmed: string[];
+}) {
+  if (!cloudAiConfigured) return null;
+  const { base, profileMd, title, company, description, confirmed } = args;
+  const { covered, implied, missing, allowedSkills } = prepRewriteArgs({ base, profileMd, confirmed });
+  const user = buildRewriteUserPrompt({ profileMd, title, company, description, confirmed, covered, implied, missing });
+
+  // Groq's free tier caps combined prompt + completion tokens per request (not just the
+  // model's own limit), so this stays modest rather than Claude's 16k budget — a CV
+  // rewrite that doesn't fit falls back to the rule-based CV, same as any other failure
+  const raw = await chatJSON(`${SYSTEM_PROMPT}\n\n${CLOUD_REWRITE_JSON_SHAPE}`, user, 55_000, 4_000);
+  const rewrite: Rewrite = {
+    headline: String(raw.headline || ''),
+    tagline: Array.isArray(raw.tagline) ? raw.tagline.map(String) : [],
+    summary: String(raw.summary || ''),
+    skills: Array.isArray(raw.skills) ? raw.skills.map((g: { group?: unknown; items?: unknown[] }) => ({ group: String(g.group || ''), items: Array.isArray(g.items) ? g.items.map(String) : [] })) : [],
+    experience: Array.isArray(raw.experience) ? raw.experience.map((e: { index?: unknown; bullets?: unknown[] }) => ({ index: Number(e.index) || 0, bullets: Array.isArray(e.bullets) ? e.bullets.map(String) : [] })) : [],
+    notes: Array.isArray(raw.notes) ? raw.notes.map(String) : []
+  };
+  const { cv, rejected } = mergeRewrite(base.cv, rewrite, profileMd, allowedSkills, missing);
+  return { cv, notes: rewrite.notes.slice(0, 6), rejected, model: 'cloud' };
 }
 
 // ---------- "Tell it what to add or change": anything the rules didn't understand ----------

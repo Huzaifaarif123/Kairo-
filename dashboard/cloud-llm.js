@@ -31,25 +31,36 @@ The CV's fields are: name, headline, summary, email, phone, location, linkedin, 
 - Points start with a strong past-tense verb and stay under 30 words. No first person ("I", "we").
 - "notDone" must only contain requests that were actually asked — never comment on a field nobody asked about.`;
 
-async function askCloud(cv, requests) {
+/** A single JSON-mode chat call to whichever cloud provider is configured. */
+export async function chatJSON(systemPrompt, userContent, timeoutMs = 60_000, maxTokens = 8000) {
   const res = await fetch(PROVIDER.url, {
     method: 'POST',
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(timeoutMs),
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${PROVIDER.key}` },
     body: JSON.stringify({
       model: PROVIDER.model,
       temperature: 0,
+      // reasoning models (e.g. Groq's gpt-oss) spend a chunk of this budget thinking
+      // before the JSON itself, so a full CV rewrite needs real headroom or the reply
+      // gets cut off mid-JSON and fails to parse
+      max_completion_tokens: maxTokens,
       response_format: { type: 'json_object' },
       messages: [
-        { role: 'system', content: EDIT_PROMPT },
-        { role: 'user', content: `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n<requests>\n${requests.join('\n')}\n</requests>` }
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent }
       ]
     })
   });
   if (!res.ok) throw new Error(`${PROVIDER.url.includes('groq') ? 'Groq' : 'OpenRouter'} error: ${res.status} ${await res.text().catch(() => '')}`);
   const data = await res.json();
-  const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+  const choice = data.choices && data.choices[0];
+  if (choice && choice.finish_reason === 'length') throw new Error(`${PROVIDER.url.includes('groq') ? 'Groq' : 'OpenRouter'} reply was cut off (too long for the token budget)`);
+  const content = choice && choice.message && choice.message.content;
   return JSON.parse(content || '{}');
+}
+
+async function askCloud(cv, requests) {
+  return chatJSON(EDIT_PROMPT, `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n<requests>\n${requests.join('\n')}\n</requests>`);
 }
 
 /**
