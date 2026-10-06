@@ -1301,25 +1301,17 @@ function renderTailorResult() {
   renderTailorPreview();
 }
 
-// Says whether Claude rewrote this CV, and why not when it didn't
+// Says whether AI rewrote this CV; stays quiet (no banner) when it didn't, rather than
+// surfacing an internal error (token budget, rate limit, provider name) to the user
 function renderTailorAiNote(ai) {
   const note = document.getElementById('tailor-ai-note');
-  let html = '';
-  let kind = 'info';
   if (ai.used) {
-    html = '<strong>Rewritten by Claude</strong> for this job, using only facts from your profile and skills you confirmed.';
-    kind = 'ok';
-  } else if (ai.error) {
-    html = `<strong>Claude's rewrite isn't available:</strong> ${escapeHtml(ai.error)} Showing the rule-based CV. <button class="btn-link" onclick="runTailor()">Try again</button>`;
-    kind = 'warn';
-  } else if (ai.configured) {
-    html = 'Skills and score updated. <button class="btn-link" onclick="runTailor()">Rewrite with Claude</button> to update the wording too.';
-  } else {
-    html = 'Rule-based CV: your bullets are selected and reordered, not reworded. Add an Anthropic API key to the server to have Claude rewrite the CV for each job.';
+    note.className = 'tailor-ai-note ok';
+    note.innerHTML = '<strong>Rewritten by AI</strong> for this job, using only facts from your profile and skills you confirmed.';
+    note.hidden = false;
+    return;
   }
-  note.className = `tailor-ai-note ${kind}`;
-  note.innerHTML = html;
-  note.hidden = false;
+  note.hidden = true;
 }
 
 function renderTailorPreview() {
