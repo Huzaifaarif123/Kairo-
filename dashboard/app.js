@@ -512,14 +512,18 @@ function renderKanban() {
         <div class="meta">
           <span>${ICONS.calendar}${escapeHtml(formatDate(app.date))}</span>
           ${app.sector ? `<span>${ICONS.tag}${escapeHtml(app.sector)}</span>` : ''}
+          ${app.contact_person ? `<span>${ICONS.mail}${escapeHtml(app.contact_person)}</span>` : ''}
+          ${app.deadline ? `<span class="followup">${ICONS.calendar}Follow up ${escapeHtml(formatDate(app.deadline))}</span>` : ''}
         </div>
         <div class="card-actions">
           <button class="btn-link" onclick="rescoreApplication(${idx})">Re-score</button>
           <select class="card-move" aria-label="Move to stage" onchange="moveApplication(${idx}, this.value)">
             ${['drafted', 'applied', 'interview', 'offer', 'rejected'].map(s => `<option value="${s}" ${s === col ? 'selected' : ''}>${s === col ? 'Move to…' : STATUS[s].label}</option>`).join('')}
           </select>
+          ${typeof cardAiToggle === 'function' ? cardAiToggle(idx) : ''}
           <button class="btn-link danger" onclick="deleteApplicationAt(${idx})">Remove</button>
         </div>
+        ${typeof cardAiPanel === 'function' ? cardAiPanel(idx) : ''}
       `;
 
       colContainer.appendChild(card);

@@ -1,10 +1,12 @@
+import './env.js';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { tailorCV, saveTailoredCV, renderTailoredCV, profileToCV, applyInstructions } from './tailor.js';
+import { tailorCV, saveTailoredCV, renderTailoredCV, profileToCV, applyInstructions, scopeCV, scopeText, mergeScoped } from './tailor.js';
 import { applyWithLocalModel, localModelReady } from './local-llm.js';
+import { cloudAiConfigured, applyWithCloudModel } from './cloud-llm.js';
 import { compileLatexWithRetry, LatexCompileError } from './latex-compile.js';
 import { resolveProfile, listProfiles, profileDetails, usesOriginalOwner, readProfileMarkdown, writeProfileMarkdown, evaluateAgainstProfile } from './profiles.js';
 
@@ -95,42 +97,37 @@ function cliError(stderr, code) {
   return text.split('\n').filter(Boolean).pop() || `Search tool exited with code ${code}`;
 }
 
+// A proper CSV parser, not a line-splitter: a quoted field (e.g. a note with "Add a
+// note:" joining several lines with "\n") can itself contain a real newline, so rows can
+// only be split on a newline that isn't inside quotes — splitting the whole text on "\n"
+// first (the previous approach) tears a multi-line field into two broken rows.
 function parseCSV(csvText) {
-  const lines = csvText.trim().split('\n');
-  if (lines.length === 0 || (lines.length === 1 && !lines[0].trim())) return [];
-  
-  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+  const text = String(csvText || '').trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  if (!text) return [];
   const rows = [];
-  
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    
-    // Parse CSV line handling quotes
-    const values = [];
-    let insideQuotes = false;
-    let currentVal = '';
-    
-    for (let c = 0; c < line.length; c++) {
-      const char = line[c];
-      if (char === '"') {
-        insideQuotes = !insideQuotes;
-      } else if (char === ',' && !insideQuotes) {
-        values.push(currentVal.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
-        currentVal = '';
-      } else {
-        currentVal += char;
-      }
+  let row = [], field = '', insideQuotes = false;
+  const pushField = () => { row.push(field.trim()); field = ''; };
+  const pushRow = () => { pushField(); rows.push(row); row = []; };
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (insideQuotes) {
+      if (char === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else insideQuotes = false; }
+      else field += char;
+      continue;
     }
-    values.push(currentVal.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
-    
-    const obj = {};
-    headers.forEach((h, idx) => {
-      obj[h] = values[idx] !== undefined ? values[idx] : '';
-    });
-    rows.push(obj);
+    if (char === '"') insideQuotes = true;
+    else if (char === ',') pushField();
+    else if (char === '\n') pushRow();
+    else field += char;
   }
-  return rows;
+  if (field !== '' || row.length) pushRow();
+  if (!rows.length) return [];
+  const headers = rows[0];
+  return rows.slice(1).filter(r => r.some(v => v !== '')).map(values => {
+    const obj = {};
+    headers.forEach((h, idx) => { obj[h] = values[idx] !== undefined ? values[idx] : ''; });
+    return obj;
+  });
 }
 
 function stringifyCSV(headers, rows) {
@@ -256,11 +253,18 @@ const server = http.createServer(async (req, res) => {
         if (!data.cv || typeof data.cv !== 'object') throw Object.assign(new Error('Tailor a CV first.'), { status: 400 });
         const text = String(data.text || '').slice(0, 4000);
         if (!text.trim()) throw Object.assign(new Error('Write what you want to add or change.'), { status: 400 });
-        const result = applyInstructions(data.cv, text);
-        const local = result.pending.length > 0 && await localModelReady();
+        const job = data.job && typeof data.job === 'object' ? data.job : {};
+        // one Edit CV section (and which job or project): only that section changes
+        const sc = data.scope && typeof data.scope === 'object' && ['personal', 'summary', 'skills', 'experience', 'projects', 'education', 'certifications'].includes(String(data.scope.section))
+          ? { section: String(data.scope.section), index: Math.max(0, Math.floor(Number(data.scope.index) || 0)) } : null;
+        const result = applyInstructions(sc ? scopeCV(data.cv, sc) : data.cv, sc ? scopeText(text, sc, data.cv) : text, { job: { title: String(job.title || '').slice(0, 200), description: String(job.description || '').slice(0, 30000) } });
+        const cloud = result.pending.length > 0 && cloudAiConfigured;
+        if (cloud) await applyWithCloudModel(result);
+        const local = !cloud && result.pending.length > 0 && await localModelReady();
         if (local) await applyWithLocalModel(result);
+        if (sc) result.cv = mergeScoped(data.cv, result.cv, sc);
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ...result, ai: local }));
+        res.end(JSON.stringify({ ...result, ai: cloud || local }));
       } catch (err) {
         res.writeHead(err.status || 400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));

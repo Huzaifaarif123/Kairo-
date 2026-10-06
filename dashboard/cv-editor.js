@@ -22,7 +22,7 @@ const CVE_PANELS = [
 
 // One CV being edited, with its per-layout style choices and last render
 function cveWorkspace(opts) {
-  return Object.assign({ cv: null, styles: {}, layout: 'ats-classic', result: null, timer: null, seq: 0, open: 'personal', edited: false, menu: null }, opts);
+  return Object.assign({ cv: null, styles: {}, layout: 'ats-classic', result: null, timer: null, seq: 0, open: 'personal', edited: false, menu: null, aiNotes: {}, aiDrafts: {}, aiUndo: [] }, opts);
 }
 
 const tailorWs = cveWorkspace({
@@ -271,6 +271,28 @@ function renderEditor(ws) {
     <button type="button" onclick="cveAction(${w}, 'up', '${section}', ${i})" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
     <button type="button" onclick="cveAction(${w}, 'down', '${section}', ${i})" ${i === n - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
     <button type="button" class="cve-remove" onclick="cveAction(${w}, 'remove', '${section}', ${i})">Remove</button></div>`;
+  // "Ask AI to change this section": what's typed here changes this section only
+  const AI_HINTS = {
+    personal: 'e.g. "phone +92 300 1234567", "headline: Lead AI Engineer"',
+    summary: 'e.g. "make it shorter", "mention that I work across AI and cloud", "improve it"',
+    skills: 'e.g. "Kafka, Terraform" or "remove PHP"',
+    experience: 'e.g. "led a team of 4 on the billing service", "improve these points", "add more skills here"',
+    projects: 'e.g. "built a WhatsApp agent for 500 clinics", "remove the point about X"',
+    education: 'e.g. "MSc Data Science, LUMS, 2020"',
+    certifications: 'e.g. "AWS Certified Developer – Associate"'
+  };
+  const aiBox = (section, i = 0, what = 'this section') => {
+    const key = `${section}:${i}`;
+    const id = `cve-ai-${ws.key}-${section}-${i}`;
+    return `<div class="cve-ai">
+      <label class="cve-ai-label" for="${id}">Ask AI to change ${v(what)}</label>
+      <div class="cve-ai-row">
+        <textarea class="input cve-ai-box" id="${id}" rows="1" placeholder="${v(AI_HINTS[section])}" onkeydown="cveAiKey(event, '${ws.key}', '${section}', ${i})">${v(ws.aiDrafts[key] || '')}</textarea>
+        <button type="button" class="btn btn-primary cve-ai-go" onclick="cveAiApply('${ws.key}', '${section}', ${i}, this)">Apply</button>
+      </div>
+      ${ws.aiNotes[key] ? `<div class="cve-ai-note">${ws.aiNotes[key]}</div>` : ''}
+    </div>`;
+  };
   const addBtn = (section, label) => `<button type="button" class="btn btn-secondary cve-add" onclick="cveAction(${w}, 'add', '${section}')">+ ${label}</button>`;
 
   const bodies = {
@@ -283,8 +305,8 @@ function renderEditor(ws) {
       ${field('LinkedIn', 'linkedin', cv.linkedin, 'text', 'linkedin.com/in/you')}
       ${field('GitHub', 'github', cv.github, 'text', 'github.com/you')}
       ${field('Key skills line', 'tagline', (cv.tagline || []).join(', '), 'csv', 'Python, LLMs, RAG, AWS')}
-    </div><p class="cve-hint">The key skills line appears under the headline in layouts that have one.</p>`,
-    summary: () => area('Summary', 'summary', cv.summary, 'text', '3–4 sentences about your experience and strengths.', 6),
+    </div><p class="cve-hint">The key skills line appears under the headline in layouts that have one.</p>${aiBox('personal', 0, 'your details')}`,
+    summary: () => `${area('Summary', 'summary', cv.summary, 'text', '3–4 sentences about your experience and strengths.', 6)}${aiBox('summary', 0, 'the summary')}`,
     experience: () => `${(cv.experience || []).map((x, i, all) => {
       const [start, end] = cvePeriodParts(x.period);
       return `<div class="cve-item"><div class="cve-item-head"><strong>${v(x.role || 'New role')}${x.company ? ` · ${v(x.company)}` : ''}</strong>${itemTools('experience', i, all.length)}</div>
@@ -295,26 +317,28 @@ function renderEditor(ws) {
           ${field('End', `experience.${i}.period`, end, 'end', 'e.g. Present')}
           ${field('Location', `experience.${i}.location`, x.location, 'text', 'City, Country / Remote')}
         </div>
-        ${area('Achievements — one per line', `experience.${i}.bullets`, (x.bullets || []).join('\n'), 'lines', 'Start each with a verb and include the result.', 5)}</div>`;
+        ${area('Achievements — one per line', `experience.${i}.bullets`, (x.bullets || []).join('\n'), 'lines', 'Start each with a verb and include the result.', 5)}
+        ${aiBox('experience', i, `this job${x.company ? ` (${x.company})` : ''}`)}</div>`;
     }).join('')}${addBtn('experience', 'Add role')}`,
     education: () => `${(cv.education || []).map((e, i, all) => `<div class="cve-item"><div class="cve-item-head"><strong>${v(e.degree || 'New entry')}</strong>${itemTools('education', i, all.length)}</div>
         <div class="cve-grid">
           ${field('Degree', `education.${i}.degree`, e.degree, 'text', 'e.g. BSc Computer Science')}
           ${field('School', `education.${i}.school`, e.school)}
           ${field('Dates', `education.${i}.period`, e.period, 'text', 'e.g. 2014 – 2018')}
-        </div></div>`).join('')}${addBtn('education', 'Add education')}`,
+        </div></div>`).join('')}${addBtn('education', 'Add education')}${aiBox('education', 0, 'your education')}`,
     skills: () => `${(cv.skills || []).map((g, i, all) => `<div class="cve-item"><div class="cve-item-head"><strong>${v(g.group || 'New group')}</strong>${itemTools('skills', i, all.length)}</div>
         <div class="cve-grid">
           ${field('Category', `skills.${i}.group`, g.group, 'text', 'e.g. Languages')}
         </div>
-        ${area('Skills — separated by commas', `skills.${i}.items`, (g.items || []).map(s => (typeof s === 'string' ? s : s.name)).join(', '), 'skills', 'Python, TypeScript, SQL', 2)}</div>`).join('')}${addBtn('skills', 'Add skill group')}`,
+        ${area('Skills — separated by commas', `skills.${i}.items`, (g.items || []).map(s => (typeof s === 'string' ? s : s.name)).join(', '), 'skills', 'Python, TypeScript, SQL', 2)}</div>`).join('')}${addBtn('skills', 'Add skill group')}${aiBox('skills', 0, 'your skills')}`,
     projects: () => `${(cv.projects || []).map((pr, i, all) => `<div class="cve-item"><div class="cve-item-head"><strong>${v(pr.name || 'New project')}</strong>${itemTools('projects', i, all.length)}</div>
         <div class="cve-grid">
           ${field('Project name', `projects.${i}.name`, pr.name)}
           ${field('Technologies', `projects.${i}.tech`, (pr.tech || []).join(', '), 'csv', 'Next.js, Python')}
         </div>
-        ${area('Description — one point per line', `projects.${i}.bullets`, (pr.bullets && pr.bullets.length ? pr.bullets : [pr.desc || '']).join('\n'), 'lines', 'What it is and what you built.', 3)}</div>`).join('')}${addBtn('projects', 'Add project')}`,
-    certifications: () => area('Certifications — one per line', 'certifications', (cv.certifications || []).join('\n'), 'lines', 'e.g. AWS Certified Developer — Amazon Web Services (2022)', 4)
+        ${area('Description — one point per line', `projects.${i}.bullets`, (pr.bullets && pr.bullets.length ? pr.bullets : [pr.desc || '']).join('\n'), 'lines', 'What it is and what you built.', 3)}
+        ${aiBox('projects', i, `this project${pr.name ? ` (${pr.name})` : ''}`)}</div>`).join('')}${addBtn('projects', 'Add project')}`,
+    certifications: () => `${area('Certifications — one per line', 'certifications', (cv.certifications || []).join('\n'), 'lines', 'e.g. AWS Certified Developer — Amazon Web Services (2022)', 4)}${aiBox('certifications', 0, 'your certifications')}`
   };
 
   box.innerHTML = CVE_PANELS.map(([id, label]) => `
@@ -522,4 +546,77 @@ function ownPrintPdf() {
   document.body.appendChild(frame);
   frame.srcdoc = cvDocument(layout.html, `${ownWs.cv.name || 'CV'} - CV`, false, layout.css);
   frame.onload = () => setTimeout(() => { frame.contentWindow.focus(); frame.contentWindow.print(); setTimeout(() => frame.remove(), 1000); }, 400);
+}
+
+// ---------- "Ask AI to change this section" ----------
+
+// Enter applies; Shift+Enter starts a new line
+function cveAiKey(e, key, section, i) {
+  if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+  e.preventDefault();
+  const btn = e.target.closest('.cve-ai').querySelector('.cve-ai-go');
+  if (btn && !btn.disabled) cveAiApply(key, section, i, btn);
+}
+
+async function cveAiApply(key, section, i, btn) {
+  const ws = CVE_WS[key];
+  const noteKey = `${section}:${i}`;
+  const box = document.getElementById(`cve-ai-${key}-${section}-${i}`);
+  const text = box ? box.value.trim() : '';
+  if (!ws || !ws.cv) return;
+  if (!text) { if (box) box.focus(); return; }
+  const done = (html) => { ws.aiNotes[noteKey] = html; renderEditor(ws); };
+  const before = JSON.parse(JSON.stringify(ws.cv));
+  // Summary: "improve it" / "rewrite it" = the summary Kairo wrote for this job (Tailor page)
+  if (section === 'summary' && key === 'tailor' && typeof instructBaseSummary === 'string' && instructBaseSummary
+    && /^(?:please\s+)?(?:improve|rewrite|regenerate|generate|redo|polish|refresh|better|tailor)(?:\s+(?:it|this|the summary|my summary))?(?:\s+for (?:this|the) (?:job|jd|role))?[.!]*$/i.test(text)) {
+    ws.aiUndo.push(before);
+    if (typeof instructUndo !== 'undefined') { instructUndo.push(before); updateInstructUndo(); }
+    ws.cv.summary = instructBaseSummary;
+    ws.edited = true;
+    ws.aiDrafts[noteKey] = '';
+    done(`<ul class="instruct-done"><li>Rewrote the summary for this job.</li></ul><button type="button" class="btn-link" onclick="cveAiUndo('${key}', '${noteKey}')">Undo</button>`);
+    cveRender(ws, 0);
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Working…';
+  ws.aiNotes[noteKey] = '<p class="instruct-wait">Working on it… requests in your own words can take up to a minute with the local AI.</p>';
+  const note = btn.closest('.cve-ai').querySelector('.cve-ai-note');
+  if (note) note.innerHTML = ws.aiNotes[noteKey];
+  else btn.closest('.cve-ai').insertAdjacentHTML('beforeend', `<div class="cve-ai-note">${ws.aiNotes[noteKey]}</div>`);
+  try {
+    const res = await fetch(apiUrl('/api/cv/instruct'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cv: ws.cv, text, scope: { section, index: i }, job: ws.job() })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not apply that');
+    if (data.done.length) {
+      ws.aiUndo.push(before);
+      if (key === 'tailor' && typeof instructUndo !== 'undefined') { instructUndo.push(before); updateInstructUndo(); }
+      ws.cv = data.cv;
+      ws.edited = true;
+      for (const skill of data.skills || []) if (key === 'tailor' && typeof instructConfirmSkill === 'function') instructConfirmSkill(skill);
+      cveRender(ws, 0);
+    }
+    // what wasn't understood stays in the box
+    ws.aiDrafts[noteKey] = data.done.length ? '' : text;
+    done((data.done.length ? `<ul class="instruct-done">${data.done.map(d => `<li>${escapeHtml(d)}</li>`).join('')}</ul><button type="button" class="btn-link" onclick="cveAiUndo('${key}', '${noteKey}')">Undo</button>` : '')
+      + (data.unclear.length ? `<div class="instruct-unclear"><strong>Not changed:</strong><ul>${data.unclear.map(u => `<li>${escapeHtml(u)}</li>`).join('')}</ul>${data.ai ? 'Try describing it a different way.' : 'Try one of the examples above.'}</div>` : ''));
+  } catch (err) {
+    ws.aiDrafts[noteKey] = text;
+    done(`<div class="instruct-unclear">${escapeHtml(err.message || 'Could not reach the server')}</div>`);
+  }
+}
+
+function cveAiUndo(key, noteKey) {
+  const ws = CVE_WS[key];
+  if (!ws || !ws.aiUndo.length) return;
+  ws.cv = ws.aiUndo.pop();
+  if (key === 'tailor' && typeof instructUndo !== 'undefined' && instructUndo.length) { instructUndo.pop(); updateInstructUndo(); }
+  ws.aiNotes[noteKey] = '<ul class="instruct-done"><li>Undid that change.</li></ul>';
+  renderEditor(ws);
+  cveRender(ws, 0);
 }

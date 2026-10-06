@@ -527,6 +527,8 @@ button.req-chip:focus-visible { outline: 2px solid var(--accent, #4f46e5); outli
 .instruct-done li { overflow-wrap: anywhere; }
 .instruct-done li::marker { color: var(--ok); }
 .instruct-unclear { margin-top: 6px; padding: 8px 10px; border-radius: var(--radius-sm); color: color-mix(in srgb, var(--warn) 85%, var(--text)); background: color-mix(in srgb, var(--warn) 10%, transparent); overflow-wrap: anywhere; }
+.instruct-unclear ul { margin: 4px 0 8px; padding-left: 18px; }
+.instruct-unclear li { margin-bottom: 2px; }
 .instruct-help { margin-top: 12px; font-size: 12.5px; color: var(--text-2); }
 .instruct-help summary { cursor: pointer; font-weight: 600; }
 .instruct-help ul { margin: 8px 0; padding-left: 18px; display: grid; gap: 4px; }
@@ -554,3 +556,14 @@ button.req-chip:focus-visible { outline: 2px solid var(--accent, #4f46e5); outli
 .instruct-answer strong:first-child { display: block; font-size: 12px; color: var(--text-2); }
 .instruct-answer p { margin: 4px 0 0; color: var(--text); line-height: 1.5; overflow-wrap: anywhere; }
 .instruct-wait { margin: 0; font-size: 12.5px; color: var(--text-2); }
+
+/* "Ask AI to change this section" inside Edit CV */
+.cve-ai { margin-top: 12px; padding: 10px 12px; border: 1px dashed var(--accent-ring); border-radius: var(--radius-sm); background: var(--accent-soft); display: grid; gap: 6px; }
+.cve-ai-label { font-size: 12px; font-weight: 600; color: var(--text); }
+.cve-ai-row { display: flex; gap: 8px; align-items: flex-start; }
+.cve-ai-box { flex: 1; min-width: 0; height: auto; min-height: 38px; resize: vertical; font: inherit; font-size: 13px; line-height: 1.45; padding: 8px 10px; }
+.cve-ai-go { flex-shrink: 0; height: 38px; }
+.cve-ai-note { font-size: 12.5px; line-height: 1.45; }
+.cve-ai-note .instruct-done { margin: 0; }
+@media (max-width: 520px) { .cve-ai-row { flex-direction: column; align-items: stretch; } .cve-ai-go { width: 100%; } }
+.cve .cve-ai textarea.cve-ai-box { min-height: 0; height: 60px; }

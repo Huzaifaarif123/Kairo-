@@ -1280,7 +1280,10 @@ const PAST_VERBS = new Set([...Object.values(GERUND_PAST).map(v => v.toLowerCase
   'built', 'led', 'ran', 'wrote', 'drove', 'grew', 'oversaw', 'rebuilt', 'spent', 'sent', 'met', 'beat', 'overcame', 'hired', 'used', 'fixed', 'won']);
 // Bullet symbols and invisible characters a pasted or uploaded CV can start a line with
 const LEAD_SYMBOLS = /^[\p{Cc}\p{Cf}\p{Co}\p{So}•●▪■◦‣∙·*\-–—>\s]+/u;
-const PRESENT_VERBS = new Set(['cut', 'set', 'own', 'win', 'make', 'take', 'drive', 'grow', 'oversee', 'spearhead', 'architect', 'partner', 'advise', 'teach', 'coach']);
+// "make" is deliberately left out: "make it sound more senior", "make this better" are
+// far more common than a genuine present-tense bullet starting "Makes …", and including
+// it made hasAction() misread instructions like that as a real achievement to paste in.
+const PRESENT_VERBS = new Set(['cut', 'set', 'own', 'win', 'take', 'drive', 'grow', 'oversee', 'spearhead', 'architect', 'partner', 'advise', 'teach', 'coach']);
 // Openers that describe duties rather than results
 const WEAK_OPENERS = /^(?:(?:was|were)\s+)?(?:responsible for|tasked with|in charge of|worked (?:on|with|in)|helped|assisted|involved in|participated in|duties included|contributed to)\b/i;
 
@@ -1359,8 +1362,22 @@ export function cleanPoint(text) {
   let t = String(text || '').replace(CONTROL_CHARS, '').replace(/\s+/g, ' ').trim()
     .replace(/^["“'`]+|["”'`]+$/g, '').replace(/[.!\s]+$/, '');
   if (!t) return '';
-  t = t.replace(/^(?:I|we)\s+(?:have|had)\s+/i, '').replace(/^(?:I|we)['’]ve\s+/i, '').replace(/^(?:I|we)\s+(?=[a-z])/i, '')
-    .replace(/\bapi(s?)\b/g, 'API$1');
+  const stripI = (s) => s.replace(/^(?:I|we)\s+(?:have|had)\s+/i, '').replace(/^(?:I|we)['’]ve\s+/i, '').replace(/^(?:I|we)\s+(?=[a-z])/i, '');
+  t = stripI(t).replace(/\bapi(s?)\b/g, 'API$1');
+  // A spoken-style wrapper ("…, can you add that to Brightloop", "could you please note
+  // this") is the request talking about itself, not part of what was done — someone
+  // describing a real achievement in their own words ("I spent 3 months setting up CI/CD…
+  // can you add that to Brightloop") still means that achievement, not this sentence as a
+  // whole; strip the wrapper and keep the real content.
+  const WRAP_VERB = 'add|include|put|note|mention|write|say|reflect|show|capture|highlight';
+  t = t.replace(new RegExp(`^(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?(?:${WRAP_VERB})\\b\\s*[:,]?\\s*(?:that|this|it)?\\s*[:,]?\\s*`, 'i'), '')
+    .replace(new RegExp(`^please\\s+(?:${WRAP_VERB})\\s+(?:that|this|it)\\b\\s*[:,]?\\s*`, 'i'), '')
+    // only a trailing wrapper (there must be real content before it, not the whole sentence)
+    .replace(new RegExp(`(?<=[\\w.%])[,]?\\s*(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?(?:${WRAP_VERB})\\b.*$`, 'i'), '')
+    .replace(new RegExp(`(?<=[\\w.%])[,]?\\s*please\\s+(?:${WRAP_VERB})\\s+(?:that|this|it)\\b.*$`, 'i'), '')
+    .trim();
+  t = stripI(t);
+  if (!t) return '';
   t = polishBullet(t);
   const g = t.match(/^([A-Za-z]+ing)\b/);
   if (g && GERUND_PAST[g[1].toLowerCase()]) t = GERUND_PAST[g[1].toLowerCase()] + t.slice(g[0].length);
@@ -1381,7 +1398,15 @@ function findPlace(cv, target) {
   const t = String(target || '').toLowerCase().replace(/^(?:my|the)\s+/, '').replace(/\s+(?:job|role|company|project|position)$/, '').trim();
   if (!t) return null;
   if (/^(current|latest|last|recent|most recent|present|first)\b/.test(t)) return cv.experience.length ? { kind: 'exp', i: 0 } : null;
-  const has = (name) => { const n = String(name || '').toLowerCase(); return n && (n === t || n.includes(t) || (t.includes(n) && n.length >= 3)); };
+  // a space/hyphen typed where the name has none ("voice glow" for "VoiceGlow") still matches
+  const squash = (s) => String(s || '').toLowerCase().replace(/[\s-]+/g, '');
+  const tSquashed = squash(t);
+  const has = (name) => {
+    const n = String(name || '').toLowerCase();
+    if (n && (n === t || n.includes(t) || (t.includes(n) && n.length >= 3))) return true;
+    const ns = squash(name);
+    return ns.length >= 3 && (ns === tSquashed || ns.includes(tSquashed) || tSquashed.includes(ns));
+  };
   let i = cv.experience.findIndex(x => has(x.company));
   if (i >= 0) return { kind: 'exp', i };
   i = cv.projects.findIndex(p => has(p.name));
@@ -1390,9 +1415,127 @@ function findPlace(cv, target) {
   return i >= 0 ? { kind: 'exp', i } : null;
 }
 
+// "the first point", "the 2nd bullet", "the last line" -> a 0-based index into that list
+const ORDINAL_WORD = { first: 0, second: 1, third: 2, fourth: 3, fifth: 4, sixth: 5, seventh: 6, eighth: 7, last: -1 };
+function ordinalIndex(word, length) {
+  const w = String(word || '').trim().toLowerCase();
+  if (w in ORDINAL_WORD) { const i = ORDINAL_WORD[w]; return i === -1 ? length - 1 : i; }
+  const n = parseInt(w, 10);
+  return Number.isFinite(n) && n >= 1 ? n - 1 : null;
+}
+
+// Light cleanup for text that replaces a whole point verbatim (a project tagline, say) —
+// tool names spelled properly and a capital letter, but not the achievement-bullet rules
+// (no verb required, no first-person stripped): it isn't necessarily an achievement.
+function cleanReplacementText(text) {
+  let t = String(text || '').trim().replace(/^["“']|["”']$/g, '').replace(/[.\s]+$/, '');
+  if (!t) return '';
+  for (const x of TERMS) {
+    if (x.category === 'Ways of Working' || x.name.length < 3 || COMMON_WORDS.has(x.name.toLowerCase())) continue;
+    t = t.replace(new RegExp(`(?<![A-Za-z0-9])${escapeRe(x.name)}(?![A-Za-z0-9])`, 'gi'), (w) => (w === x.name ? w : x.name));
+  }
+  return `${t[0].toUpperCase()}${t.slice(1)}.`;
+}
+
+// The job a new point fits best: the one whose points use the same tools or kind of
+// tools; the latest job when nothing points elsewhere
+function bestJobFor(cv, text) {
+  if (!cv.experience.length) return null;
+  const tools = TERMS.filter(t => t.category !== 'Ways of Working' && t.name !== 'AI' && countMatches(t.re, text) > 0);
+  if (!tools.length) return { kind: 'exp', i: 0 };
+  // the most recent job whose points already use one of these tools
+  const i = cv.experience.findIndex(x => tools.some(t => countMatches(t.re, x.bullets.join(' ')) > 0));
+  return { kind: 'exp', i: Math.max(0, i) };
+}
+
+// Text about the CV itself ("some more skills into the experience") is an instruction,
+// never a point: a point says what was done
+const META_WORDS = /\b(?:skills?|experiences?|points?|bullets?|sections?|cv|resume|profile|summary|headline|more|some|better|stronger|keywords?)\b/i;
+// A sentence can have an action verb and still say nothing real ("add something useful
+// here", "make some improvements"): everything after the verb is filler, naming no
+// concrete thing (no tool, number, person, result). Caught separately from META_WORDS,
+// which looks for words about the CV itself rather than this kind of emptiness.
+const FILLER_WORDS = /\b(?:some|any|many|various|certain|something|anything|nothing|stuff|things?|useful|helpful|relevant|appropriate|whatever|improvements?|changes?|updates?|enhancements?|real[\s-]?time)\b/i;
+const FILLER_WORDS_G = new RegExp(FILLER_WORDS.source, 'gi');
+// True only when a sentence has filler words AND, once those and the leading verb are
+// stripped, nothing concrete (a tool, number, person, result) is left — "Added useful
+// stuff here" is filler all the way down; "Mentored two junior developers" is not.
+function hasNoConcreteContent(text) {
+  const t = String(text || '').trim();
+  if (!t || !FILLER_WORDS.test(t)) return false;
+  const rest = t.replace(FILLER_WORDS_G, ' ').replace(/^[A-Za-z-]+\s*/, ' ');
+  const concrete = rest.split(/\s+/).filter(w => w.length > 2 && !/^(?:here|there|this|that|these|those|also|just|now|will|please)$/i.test(w));
+  return concrete.length === 0;
+}
+function looksLikePoint(text) {
+  const t = String(text).trim().replace(/^(?:I|we)\s+(?:have\s+|also\s+)?/i, '');
+  // Requires a real action verb up front ("Built…", "Led…"), not just four unrelated
+  // words — "something about leadership in there" and "2 more years" are instructions
+  // or fragments, not achievements, and must never be pasted onto the CV as a bullet.
+  if (!hasAction(t) || META_WORDS.test(t)) return false;
+  // Past the verb, is there anything concrete, or just filler? "Built Kafka pipelines"
+  // keeps going; "Added something useful here" has nothing left once filler is removed.
+  return !hasNoConcreteContent(t);
+}
+
+/**
+ * "Add more skills into my experience": the job's skills you list but no point shows are
+ * worked into a related point, next to a tool of the same kind ("PostgreSQL" -> "PostgreSQL
+ * and Redis"). Skills with no related point stay in the skills section.
+ */
+function weaveSkills(cv, jdTerms, done) {
+  const work = () => cv.experience.flatMap(x => x.bullets).join('\n');
+  const listed = cv.skills.flatMap(g => g.items.map(i => i.name));
+  const pool = (jdTerms.length ? jdTerms : TERMS).filter(t => t.category !== 'Ways of Working' && t.name !== 'AI'
+    && countMatches(t.re, work()) === 0 && listed.some(n => n.toLowerCase() === t.name.toLowerCase() || countMatches(t.re, n) > 0));
+  const placed = [], kept = [];
+  const used = new Set();
+  for (const t of pool.slice(0, 8)) {
+    const kind = categoryOf(t.name);
+    let ok = false;
+    for (const x of cv.experience) {
+      for (let j = 0; j < x.bullets.length && !ok; j++) {
+        const key = `${cv.experience.indexOf(x)}:${j}`;
+        if (used.has(key)) continue;
+        const kin = TERMS.find(o => o !== t && o.category !== 'Ways of Working' && categoryOf(o.name) === kind && countMatches(o.re, x.bullets[j]) > 0);
+        if (!kin) continue;
+        const re = new RegExp(kin.re.source, 'i');
+        const hit = x.bullets[j].match(re);
+        if (!hit) continue;
+        x.bullets[j] = x.bullets[j].replace(re, (w) => `${w} and ${t.name}`).replace(/ and (\S+) and /, ', $1 and ');
+        used.add(key);
+        placed.push(`${t.name} (under ${x.company || x.role})`);
+        ok = true;
+      }
+      if (ok) break;
+    }
+    if (!ok) kept.push(t.name);
+  }
+  if (placed.length) done.push(`Worked ${joinList(placed)} into related points, next to tools of the same kind`);
+  if (kept.length) done.push(`Kept ${joinList(kept.slice(0, 6))} in your skills only: no point uses a related tool`);
+  if (!placed.length && !kept.length) done.push('Your points already show the skills this job asks for');
+}
+
+/**
+ * "Add some more skills" (no names given): a skill can only honestly be added when the
+ * CV's own points already show it — never invented from nothing. Tools the posting asks
+ * for (or, with no posting, any recognized tool) that appear in a bullet or a project's
+ * tech but aren't in the skills list yet are added; there's nothing to add if everything
+ * demonstrated is already listed.
+ */
+function addMissingListedSkills(cv, jdTerms, done, added) {
+  const work = () => [...cv.experience.flatMap(x => x.bullets), ...cv.projects.flatMap(p => (p.bullets && p.bullets.length ? p.bullets : [p.desc].filter(Boolean)).concat(p.tech || []))].join('\n');
+  const listed = new Set(cv.skills.flatMap(g => g.items.map(i => i.name.toLowerCase())));
+  const pool = (jdTerms.length ? jdTerms : TERMS).filter(t => t.category !== 'Ways of Working' && t.name !== 'AI'
+    && countMatches(t.re, work()) > 0 && !listed.has(t.name.toLowerCase()));
+  const names = [...new Set(pool.map(t => t.name))].slice(0, 6);
+  if (names.length) addSkills(cv, names.join(', '), done, added);
+  else done.push('Nothing to add: every skill your points and projects show is already listed');
+}
+
 const placeName = (cv, p) => (p.kind === 'exp' ? [cv.experience[p.i].role, cv.experience[p.i].company].filter(Boolean).join(' at ') : `the ${cv.projects[p.i].name} project`);
 
-function addPoint(cv, place, text, done) {
+function addPoint(cv, place, text, done, note) {
   const point = cleanPoint(text);
   if (!point) return false;
   if (place.kind === 'exp') cv.experience[place.i].bullets.unshift(point);
@@ -1402,7 +1545,7 @@ function addPoint(cv, place, text, done) {
     pr.bullets.push(point);
     pr.desc = pr.bullets.join(' ');
   }
-  done.push(`Added to ${placeName(cv, place)}: "${point}"`);
+  done.push(`Added to ${placeName(cv, place)}: "${point}"${note ? ` ${note}` : ''}`);
   return true;
 }
 
@@ -1413,8 +1556,61 @@ function skillName(raw) {
   return term ? term.name : s;
 }
 
-function addSkills(cv, list, done, added) {
-  const names = String(list).split(/\s*(?:,|;|\band\b|&)\s*/i).map(skillName).filter(n => n && n.length <= 60);
+// A skill without a specific name ("some more skills related to the tools") must never
+// become a literal skill on the CV — a real skill is a short name, not a sentence, and a
+// known term (Kubernetes, Terraform, …) always passes; only unrecognized text is checked.
+const SKILL_FILLER = /\b(?:some|any|many|various|certain|more|additional|extra|new|relevant|related|useful|helpful|appropriate|whatever|something|anything|nothing|stuff|things?|improvements?|changes?|updates?|enhancements?|real[\s-]?time|tools?|skills?|technolog(?:y|ies)|keywords?)\b/i;
+function looksLikeSkillName(name) {
+  const n = String(name || '').trim();
+  if (!n) return false;
+  if (TERMS.some(t => t.name.toLowerCase() === n.toLowerCase())) return true;
+  if (n.split(/\s+/).length > 4) return false;
+  return !SKILL_FILLER.test(n);
+}
+
+// "I got my AWS Solutions Architect cert last month" -> "AWS Solutions Architect": the
+// sentence around a real certification's name is dropped, the name itself kept as-is.
+function extractCertName(text) {
+  let t = String(text || '').trim().replace(/[.!]+$/, '');
+  t = t.replace(/^i\s+(?:just\s+)?(?:got|earned|received|passed|completed|obtained|have)\s+(?:my\s+|the\s+|an?\s+)?/i, '')
+    .replace(/\b(?:cert|certification|certificate)\b/i, '')
+    .replace(/\s*,?\s*(?:last\s+(?:month|week|year)|recently|this\s+(?:month|week|year)|a\s+(?:few\s+)?(?:weeks?|months?)\s+ago)\s*$/i, '');
+  return t.replace(/\s{2,}/g, ' ').trim();
+}
+
+// A certification without a real name ("a relevant certification", "add a cert") must
+// never be added — that's a fabricated credential, not an honest gap in phrasing.
+const CERT_STOPWORDS = new Set(['add', 'a', 'an', 'the', 'my', 'this', 'that', 'some', 'any', 'include', 'list', 'it', 'certification', 'certifications', 'certificate', 'cert', 'certs', 'relevant', 'appropriate', 'useful', 'good', 'nice', 'whatever', 'something', 'real', 'actual']);
+function looksLikeCertName(text) {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (/^i\s+(?:just\s+)?(?:got|earned|received|passed|completed|obtained|have)\b/i.test(t)) return false;
+  const words = t.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(Boolean);
+  if (!words.length || words.length > 10) return false;
+  return words.some(w => w.length > 2 && !CERT_STOPWORDS.has(w));
+}
+
+// "my masters degree in data science from MIT, finished 2022" -> fields, instead of the
+// whole sentence dumped into "degree" when it isn't in the explicit "X | Y | Z" format.
+function parseDegreeText(text) {
+  let t = String(text || '').trim().replace(/[.]$/, '');
+  let school = '';
+  let m = t.match(/\bfrom\s+([A-Z][\w&.'-]*(?:\s+(?:of\s+)?[A-Z][\w&.'-]*){0,4})\b/);
+  if (m) { school = m[1].trim(); t = (t.slice(0, m.index) + t.slice(m.index + m[0].length)).trim(); }
+  let period = '';
+  m = t.match(/\b(?:finished|graduated|completed)?\s*\(?((?:19|20)\d{2}(?:\s*(?:[-–—]|to)\s*(?:(?:19|20)\d{2}|present))?)\)?\s*$/i);
+  if (m) { period = m[1].trim(); t = t.slice(0, m.index).trim(); }
+  t = t.replace(/\s*,\s*$/, '').replace(/^(?:my\s+|a\s+|an\s+)/i, '').trim();
+  return { degree: t, school, period };
+}
+
+function addSkills(cv, list, done, added, unclear, raw, jdTerms) {
+  const candidates = String(list).split(/\s*(?:,|;|\band\b|&)\s*/i).map(skillName).filter(n => n && n.length <= 60);
+  const names = candidates.filter(looksLikeSkillName);
+  const vague = candidates.filter(n => !looksLikeSkillName(n));
+  // nothing nameable was given at all ("add some more skills") — fall back to what the
+  // CV's own points and projects already demonstrate, never an invented name
+  if (!names.length && vague.length && jdTerms !== undefined) { addMissingListedSkills(cv, jdTerms, done, added); return; }
   const fresh = [];
   for (const name of names) {
     if (cv.skills.some(g => g.items.some(i => i.name.toLowerCase() === name.toLowerCase()))) continue;
@@ -1426,14 +1622,17 @@ function addSkills(cv, list, done, added) {
     added.push(name);
   }
   if (fresh.length) done.push(`Added to your skills: ${joinList(fresh)}`);
-  else done.push(`${joinList(names)} ${names.length > 1 ? 'are' : 'is'} already in your skills`);
+  else if (names.length) done.push(`${joinList(names)} ${names.length > 1 ? 'are' : 'is'} already in your skills`);
+  if (vague.length) (unclear || done).push(`${raw || list} — name the actual skills to add, e.g. "Add skills: Kubernetes, Terraform". I can't add "${joinList(vague)}" as a skill — it doesn't name one.`);
 }
 
 function removeThing(cv, rawTarget, done, unclear, raw) {
+  // "the point about X" means a point, never the skill X
+  const onlyPoints = /^(?:the\s+)?(?:point|bullet|line|sentence)s?\s+(?:about|on|with|containing|that says|saying)\s+/i.test(String(rawTarget).trim());
   let t = String(rawTarget).trim().replace(/^["“']|["”']$/g, '').replace(/\.$/, '')
     .replace(/^(?:the\s+)?(?:point|bullet|line|sentence)s?\s+(?:about|on|with|containing|that says|saying)\s+/i, '')
     .replace(/^(?:the\s+)?skills?\s+/i, '').replace(/\s+from\s+(?:my\s+|the\s+)?(?:skills|cv|resume)$/i, '').trim();
-  if (!t) { unclear.push(raw); return; }
+  if (!t) { unclear.push(`${raw} — tell me what to remove, e.g. "remove PHP" or "remove the point about billing".`); return; }
   const section = t.toLowerCase().replace(/^the\s+/, '').replace(/\s+section$/, '');
   if (['projects', 'certifications', 'education'].includes(section)) {
     cv[section] = [];
@@ -1441,7 +1640,7 @@ function removeThing(cv, rawTarget, done, unclear, raw) {
     return;
   }
   const name = skillName(t).toLowerCase();
-  for (const g of cv.skills) {
+  if (!onlyPoints) for (const g of cv.skills) {
     const before = g.items.length;
     g.items = g.items.filter(i => i.name.toLowerCase() !== name);
     if (g.items.length < before) {
@@ -1453,13 +1652,15 @@ function removeThing(cv, rawTarget, done, unclear, raw) {
   const low = t.toLowerCase();
   const pi = cv.projects.findIndex(p => p.name.toLowerCase() === low);
   if (pi >= 0) { done.push(`Removed the ${cv.projects[pi].name} project`); cv.projects.splice(pi, 1); return; }
+  const ei = cv.education.findIndex(e => `${e.degree} ${e.school}`.toLowerCase().includes(low));
+  if (ei >= 0 && !cv.certifications.some(c => c.toLowerCase().includes(low))) { done.push(`Removed education: ${[cv.education[ei].degree, cv.education[ei].school].filter(Boolean).join(', ')}`); cv.education.splice(ei, 1); return; }
   const ci = cv.certifications.findIndex(c => c.toLowerCase().includes(low));
   if (ci >= 0) { done.push(`Removed the certification "${cv.certifications[ci]}"`); cv.certifications.splice(ci, 1); return; }
   const hits = [];
   cv.experience.forEach((x, i) => x.bullets.forEach((b, j) => { if (b.toLowerCase().includes(low)) hits.push({ i, j, b, exp: true }); }));
   cv.projects.forEach((p, i) => (p.bullets || []).forEach((b, j) => { if (b.toLowerCase().includes(low)) hits.push({ i, j, b, exp: false }); }));
-  if (!hits.length) { unclear.push(`${raw} (nothing on the CV matches "${t}")`); return; }
-  if (hits.length > 2) { unclear.push(`${raw} (${hits.length} points mention "${t}"; quote more of the point you mean)`); return; }
+  if (!hits.length) { unclear.push(`${raw} — I couldn't find anything matching "${t}" on the CV, so nothing was removed.`); return; }
+  if (hits.length > 2) { unclear.push(`${raw} — ${hits.length} different points mention "${t}". Paste a bit more of the exact sentence so I know which one you mean.`); return; }
   for (const h of hits.sort((a, b) => b.j - a.j)) {
     if (h.exp) cv.experience[h.i].bullets.splice(h.j, 1);
     else { const p = cv.projects[h.i]; p.bullets.splice(h.j, 1); p.desc = p.bullets.join(' '); }
@@ -1495,7 +1696,7 @@ function replaceText(cv, from, to, done, unclear, raw) {
     const n = swap(cv[key] || '');
     if (n !== null) { cv[key] = n; done.push(`Changed your ${key}`); return; }
   }
-  unclear.push(`${raw} (couldn't find "${from}" on the CV)`);
+  unclear.push(`${raw} — I couldn't find "${from}" anywhere on the CV, so nothing was changed.`);
 }
 
 // "Add realistic achievements / numbers": every point without a number becomes a measured
@@ -1507,7 +1708,7 @@ const NUMBER_DRAFTS = [
   [/\b(payments?|checkout|billing|orders?|transactions?|invoic\w*|stripe)\b/i, 'handling ~10,000 transactions a month'],
   [/\b(ci\/cd|pipelines?|deploy\w*|releases?|github actions|gitlab ci|docker|kubernetes)\b/i, 'cutting release time by ~40%'],
   [/\b(performance|optimi[sz]\w*|latency|faster|speed|load(ing)? time|lighthouse|caching|cache|index\w*|quer(y|ies))\b/i, 'improving response times by ~30%'],
-  [/\b(monitor\w*|observability|logging|alert\w*|sentry|grafana|datadog|prometheus)\b/i, 'cutting incident resolution time by ~35%'],
+  [/\b(monitor\w*|observability|logging|alert\w*|sentry|grafana|datadog|prometheus|on[- ]?call|incident|outage|pager|escalat\w*)\b/i, 'cutting incident resolution time by ~35%'],
   [/\b(automat\w*|scripts?|workflows?)\b/i, 'saving the team ~10 hours a week'],
   [/\b(mentor\w*|led|lead|team|coach\w*|review\w*)\b/i, 'across a team of ~5 engineers'],
   [/\b(data|etl|elt|reports?|analytics|warehouse|spark|airflow)\b/i, 'processing ~1M records a day'],
@@ -1516,6 +1717,37 @@ const NUMBER_DRAFTS = [
   [/\b(security|auth\w*|permissions?|compliance)\b/i, 'protecting ~10,000 user accounts']
 ];
 const DEFAULT_DRAFT = 'improving delivery speed by ~20%';
+
+// Naming just a topic ("on call and incident response", "mentoring") rather than a
+// finished sentence is still a real request — a plausible, honestly-marked draft point is
+// built for it (same ~estimate convention as measuredVersion below) rather than either
+// inventing specifics or refusing outright. Covers common, recognizable topics only; an
+// unrecognized one still gets the "tell me what you did" message, never a guess.
+const TOPIC_OPENERS = [
+  [/\b(on[- ]?call|incident|outage|pager|escalat\w*)\b/i, 'Took part in the on-call rotation, triaging and resolving incidents'],
+  [/\b(mentor\w*|coach\w*|onboard\w*|junior)/i, 'Mentored junior engineers and helped them ramp up'],
+  [/\b(review|pull request|code quality)/i, 'Reviewed pull requests and gave feedback to keep code quality high'],
+  [/\b(test(s|ing)?|jest|cypress|pytest|qa)\b/i, 'Wrote automated tests for new and existing features'],
+  [/\b(ci\/cd|pipelines?|deploy\w*|releases?|github actions|gitlab ci)\b/i, 'Set up CI/CD pipelines to automate builds and deployments'],
+  [/\b(performance|optimi[sz]\w*|latency|caching|cache)\b/i, 'Profiled and optimized slow code paths'],
+  [/\b(security|auth\w*|permissions?|compliance)\b/i, 'Hardened authentication and access controls'],
+  [/\b(document\w*|docs|runbooks?|wiki)\b/i, 'Wrote documentation and runbooks for the team'],
+  [/\bmigrat\w*\b/i, 'Led a migration effort with minimal disruption'],
+  [/\b(monitor\w*|observability|logging|alert\w*|sentry|grafana|datadog|prometheus)\b/i, 'Set up monitoring and alerting to catch issues early'],
+  [/\b(data|etl|elt|reports?|analytics|warehouse|spark|airflow)\b/i, 'Built data pipelines and reporting'],
+  [/\b(apis?|services?|backend|microservices?|endpoints?|server)\b/i, 'Designed and built APIs and backend services'],
+  [/\b(dashboards?|ui|interfaces?|frontend|front-end|pages?|components?)\b/i, 'Built UI components and pages'],
+  [/\b(cost|spend\w*|billing|budget)\b/i, 'Identified and cut unnecessary cloud spend'],
+  [/\b(hiring|interview\w*|recruit\w*)\b/i, 'Interviewed candidates and helped grow the team'],
+  [/\b(architect\w*|design doc|rfc)\b/i, 'Wrote design docs and drove architecture decisions']
+];
+function draftPointFromTopic(text) {
+  const t = String(text || '').trim();
+  const opener = TOPIC_OPENERS.find(([re]) => re.test(t));
+  if (!opener) return null;
+  const clause = (NUMBER_DRAFTS.find(([re]) => re.test(t)) || [null, DEFAULT_DRAFT])[1];
+  return /^across\b/.test(clause) ? `${opener[1]} ${clause}.` : `${opener[1]}, ${clause}.`;
+}
 
 /** Points without a number, each with a measured version: [{ original, suggested }]. */
 // A point with a measured result: its vague ending ("…, enabling reliable releases", "… to
@@ -1601,13 +1833,77 @@ const splitRequests = (line) => line.split(/\s*,?\s+(?:and then|and also|then)\s
 
 const CONTACT_FIELD = { phone: 'phone', 'phone number': 'phone', mobile: 'phone', email: 'email', 'email address': 'email', location: 'location', city: 'location', address: 'location', linkedin: 'linkedin', github: 'github' };
 
+// ---------- "Say anything, the whole CV updates": checking an AI's whole-CV rewrite ----------
+// Shared by the Claude path and the local-model (Ollama) path, so both are held to the
+// same honesty rules: real jobs/schools/certifications only, and no number that wasn't
+// already on the CV, asked for in the request, or clearly marked as an estimate (~).
+
+/** Numbers as written, reduced to their digits: "2,000" and "2000" compare equal. */
+function editNumbers(s) {
+  return (String(s).match(/\d[\d,.]*/g) || []).map(n => n.replace(/[,.]$/, '').replace(/,/g, ''));
+}
+
+/**
+ * Whether an AI's whole-CV rewrite only did what was asked: no new employer, school or
+ * certification the person didn't name, and no new number that isn't already on the CV,
+ * in the request, or written as an estimate ("~30%").
+ * @param {any} original the CV before the edit
+ * @param {any} edited what the AI returned
+ * @param {string} requestText the request(s) that were asked, joined together
+ */
+export function validateWholeCvEdit(original, edited, requestText) {
+  if (!edited || typeof edited !== 'object' || !edited.name || !String(edited.name).trim()) return false;
+  // never silently wipe out all experience
+  if (original.experience && original.experience.length && edited.experience && !edited.experience.length) return false;
+  const asked = String(requestText || '').toLowerCase();
+  const was = (list) => new Set((list || []).map(x => String(x).toLowerCase()));
+  const companies = was((original.experience || []).map(x => x.company));
+  const schools = was((original.education || []).map(e => e.school));
+  const certs = was(original.certifications || []);
+  const namesOk = (edited.experience || []).every(x => companies.has(String(x.company).toLowerCase()) || asked.includes(String(x.company).toLowerCase()))
+    && (edited.education || []).every(e => schools.has(String(e.school).toLowerCase()) || asked.includes(String(e.school).toLowerCase()))
+    && (edited.certifications || []).every(c => certs.has(String(c).toLowerCase()) || asked.includes(String(c).toLowerCase()));
+  if (!namesOk) return false;
+  // every number in the result must already be on the CV, in the request, or marked "~"
+  const allowed = new Set([...editNumbers(JSON.stringify(original)), ...editNumbers(requestText)]);
+  const re = /(~\s?)?\b\d[\d,.]*\b/g;
+  let m;
+  const text = JSON.stringify(edited);
+  while ((m = re.exec(text))) {
+    const n = m[0].replace(/^~\s?/, '').replace(/[,.]$/, '').replace(/,/g, '');
+    if (!allowed.has(n) && !m[1]) return false;
+  }
+  // A vague request ("make it better", "optimize this") must never come back as a new or
+  // changed bullet that itself says nothing concrete — that's the model echoing the
+  // instruction (or padding with filler) instead of declining it.
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  const origLines = new Set([
+    ...(original.experience || []).flatMap(x => x.bullets || []),
+    ...(original.projects || []).flatMap(p => p.bullets || []),
+    original.summary
+  ].map(norm));
+  const newLines = [
+    ...(edited.experience || []).flatMap(x => x.bullets || []),
+    ...(edited.projects || []).flatMap(p => p.bullets || []),
+    edited.summary
+  ].filter(Boolean);
+  if (newLines.some(l => !origLines.has(norm(l)) && hasNoConcreteContent(l))) return false;
+  return true;
+}
+
 /**
  * Apply plain instructions to a CV. One instruction per line (or separated by ";").
+ * @param {any} input the CV
+ * @param {string} text the instructions
+ * @param {{ whole?: boolean, job?: { title?: string, description?: string } | null }} [options]
  * @returns {{ cv: any, done: string[], unclear: string[], skills: string[], pending: string[] }}
  */
-export function applyInstructions(input, text, { whole = false } = {}) {
+export function applyInstructions(input, text, { whole = false, job = null } = {}) {
   const cv = normalizeCV(input);
   const done = [], unclear = [], skills = [];
+  // the posting's skills, when the job is known (for "add more skills into my experience")
+  const jdText = job ? `${job.title || ''}\n${job.description || ''}` : '';
+  const jdTerms = jdText.trim() ? TERMS.filter(t => countMatches(t.re, jdText) > 0) : [];
   // (whole: one command as written, e.g. from the local model, whose text may contain ";")
   const lines = whole ? [String(text || '').replace(CONTROL_CHARS, '').trim()].filter(Boolean)
     : String(text || '').replace(CONTROL_CHARS, '').split(/\n+|;\s*(?=[A-Za-z])/).map(l => l.trim().replace(/^[-•*\d.)\s]+(?=[A-Za-z"“])/, '')).filter(Boolean)
@@ -1638,8 +1934,32 @@ export function applyInstructions(input, text, { whole = false } = {}) {
     if (!/["“:]/.test(line) && /\b(?:certifications?|certificates?|certs?)\b/i.test(line) && !/^(?:remove|delete|drop)\b/i.test(line)
       && !/^add\s+.+\s+(?:to|in|under|into)\s+(?:my\s+|the\s+)?certifications?\b/i.test(line)) {
       const fits = [...new Set(Object.entries(CERTIFICATIONS_FOR).filter(([k]) => countMatches(TERMS.find(t => t.name === k)?.re || /$^/, JSON.stringify(cv)) > 0).map(([, v]) => v))].slice(0, 4);
-      unclear.push(`${raw} (certifications are only added by name, so the CV stays true. Write e.g. "Add certification: ${fits[0] || 'AWS Certified Developer – Associate'}" for each one you hold${fits.length > 1 ? `; ones that fit this CV: ${fits.join(', ')}` : ''})`);
+      unclear.push(`${raw} — I only add certifications you name, so nothing untrue ends up on the CV. Write e.g. "Add certification: ${fits[0] || 'AWS Certified Developer – Associate'}" for each one you actually hold${fits.length > 1 ? `; these fit the job: ${fits.join(', ')}` : ''}.`);
       continue;
+    }
+    // "In the VoiceGlow project change the first point to …", "under Paywise replace the
+    // 2nd bullet with …": an ordinal picks out which point, in a named job or project
+    {
+      const ORD = '(first|second|third|fourth|fifth|sixth|seventh|eighth|last|\\d+(?:st|nd|rd|th)?)';
+      let placeTarget, ordinalWord, newTextRaw;
+      if ((m = line.match(new RegExp(`^(?:in|under|at|for)\\s+(?:the\\s+|my\\s+)?(.+?)\\s+(?:project|job|role)?\\s*,?\\s*(?:change|replace|update|set|rewrite)\\s+(?:the\\s+)?${ORD}\\s+(?:point|bullet|line)\\s+(?:to|with|as)\\s*:?\\s*(.+)$`, 'i')))) {
+        [, placeTarget, ordinalWord, newTextRaw] = m;
+      } else if ((m = line.match(new RegExp(`^(?:change|replace|update|set|rewrite)\\s+(?:the\\s+)?${ORD}\\s+(?:point|bullet|line)\\s+(?:in|under|at|for|of)\\s+(?:the\\s+|my\\s+)?(.+?)\\s+(?:to|with|as)\\s*:?\\s*(.+)$`, 'i')))) {
+        [, ordinalWord, placeTarget, newTextRaw] = m;
+      }
+      if (placeTarget !== undefined) {
+        const place = findPlace(cv, placeTarget);
+        if (!place) { unclear.push(`${raw} — I don't see a job or project called "${placeTarget}" on this CV.`); continue; }
+        const list = place.kind === 'exp' ? cv.experience[place.i].bullets : cv.projects[place.i].bullets;
+        const idx = ordinalIndex(ordinalWord, list.length);
+        if (idx === null || idx < 0 || idx >= list.length) { unclear.push(`${raw} — ${placeName(cv, place)} only has ${list.length} point${list.length === 1 ? '' : 's'}.`); continue; }
+        const newText = cleanReplacementText(newTextRaw);
+        if (!newText) { unclear.push(`${raw} — I need the new text to change it to.`); continue; }
+        list[idx] = newText;
+        if (place.kind === 'proj') cv.projects[place.i].desc = list.join(' ');
+        done.push(`Changed point ${idx + 1} of ${placeName(cv, place)} to: "${newText}"`);
+        continue;
+      }
     }
     // Replace "old" with "new"
     if ((m = line.match(/^(?:replace|change|swap)\s+["“'](.+?)["”']\s+(?:with|to|for|by|into)\s+["“'](.+?)["”']\.?$/i))) { replaceText(cv, m[1], m[2], done, unclear, raw); continue; }
@@ -1662,14 +1982,21 @@ export function applyInstructions(input, text, { whole = false } = {}) {
       else { const field = CONTACT_FIELD[key]; cv[field] = value.replace(/[.]$/, ''); done.push(`Set your ${key} to ${cv[field]}`); }
       continue;
     }
-    if ((m = line.match(/^(?:make\s+)?my\s+(headline|title)\s+(?:should\s+(?:be|say|read)|to\s+(?:be|say|read)|will\s+be|is|=|as)\s+(.+)$/i)) || (m = line.match(/^make\s+my\s+(headline|title)\s+(.+)$/i))) {
+    // "make my headline sound more senior" is a request about the headline's tone, not
+    // its literal new text — only a bare value ("make my headline Senior Engineer") is a
+    // direct assignment; "sound/look/read [like] …" goes to the rules below instead
+    if ((m = line.match(/^(?:make\s+)?my\s+(headline|title)\s+(?:should\s+(?:be|say|read)|to\s+(?:be|say|read)|will\s+be|is|=|as)\s+(.+)$/i)) || (m = line.match(/^make\s+my\s+(headline|title)\s+(?!sound\b|look\b|read\b)(.+)$/i))) {
       cv.headline = m[2].trim().replace(/^["“']|["”'.]$/g, '');
       done.push(`Changed your headline to "${cv.headline}"`);
       continue;
     }
     if (/\b(?:more\s+senior|sound\s+senior|senior[- ]level|seniority)\b/i.test(line) && !/\bunder\b|:/.test(line)) {
-      if (/\b(senior|lead|principal|staff|head|chief)\b/i.test(cv.headline)) done.push(`Your headline already reads senior: "${cv.headline}"`);
-      else { cv.headline = `Senior ${cv.headline || (cv.experience[0] && cv.experience[0].role) || 'Engineer'}`.trim(); done.push(`Changed your headline to "${cv.headline}"`); }
+      // "Senior" is checked against the title that will actually be used (the headline,
+      // or the role it falls back to), not just cv.headline — otherwise a role that's
+      // already "Senior Dev" becomes "Senior Senior Dev"
+      const base = cv.headline || (cv.experience[0] && cv.experience[0].role) || 'Engineer';
+      if (/\b(senior|lead|principal|staff|head|chief)\b/i.test(base)) done.push(`Your headline already reads senior: "${base}"`);
+      else { cv.headline = `Senior ${base}`.trim(); done.push(`Changed your headline to "${cv.headline}"`); }
       continue;
     }
     // "The point about Celery should mention it handled 1M tasks a day", "add 1M tasks a day to the point about Celery"
@@ -1687,7 +2014,7 @@ export function applyInstructions(input, text, { whole = false } = {}) {
         const { x, j } = hits[0];
         x.bullets[j] = `${x.bullets[j].replace(/[.\s]+$/, '')}, ${extra}.`;
         done.push(`Changed a point under ${x.role || x.company}: "${x.bullets[j]}"`);
-      } else unclear.push(`${raw} (no point mentions "${m[1]}")`);
+      } else unclear.push(`${raw} — none of your points mention "${m[1]}" yet.`);
       continue;
     }
     // "sound more like a team lead" -> headline
@@ -1710,25 +2037,25 @@ export function applyInstructions(input, text, { whole = false } = {}) {
     if ((m = line.match(/^(?:change|set|rename|update)\s+(?:my\s+)?(?:title|role|job title|position)\s+(?:at|in|for|with)\s+(.+?)\s+(?:to|as)\s+(.+)$/i))) {
       const place = findPlace(cv, m[1]);
       if (place && place.kind === 'exp') { cv.experience[place.i].role = m[2].trim().replace(/^["“']|["”'.]$/g, ''); done.push(`Changed your title at ${cv.experience[place.i].company || m[1]} to "${cv.experience[place.i].role}"`); }
-      else unclear.push(`${raw} (no job at "${m[1]}" on the CV)`);
+      else unclear.push(`${raw} — I don't see a job called "${m[1]}" on this CV.`);
       continue;
     }
     if ((m = line.match(/^(?:change|set|update)\s+(?:the\s+|my\s+)?(?:dates?|period|years?)\s+(?:at|for|of|with)\s+(.+?)\s+to\s+(.+)$/i))) {
       const place = findPlace(cv, m[1]);
       if (place && place.kind === 'exp') { cv.experience[place.i].period = m[2].trim().replace(/[.]$/, ''); done.push(`Changed the dates at ${cv.experience[place.i].company || m[1]} to ${cv.experience[place.i].period}`); }
-      else unclear.push(`${raw} (no job at "${m[1]}" on the CV)`);
+      else unclear.push(`${raw} — I don't see a job called "${m[1]}" on this CV.`);
       continue;
     }
     if ((m = line.match(/^(?:rename|change)\s+(?:the\s+)?company\s+(.+?)\s+to\s+(.+)$/i))) {
       const place = findPlace(cv, m[1]);
       if (place && place.kind === 'exp') { const was = cv.experience[place.i].company; cv.experience[place.i].company = m[2].trim().replace(/[.]$/, ''); done.push(`Renamed ${was} to ${cv.experience[place.i].company}`); }
-      else unclear.push(`${raw} (no company "${m[1]}" on the CV)`);
+      else unclear.push(`${raw} — I don't see a company called "${m[1]}" on this CV.`);
       continue;
     }
     if ((m = line.match(/^(?:remove|delete|drop|take out)\s+(?:the\s+|my\s+)?(?:job|role|position|experience)\s+(?:at|with|from|in)\s+(.+)$/i))) {
       const place = findPlace(cv, m[1]);
       if (place && place.kind === 'exp') { const [x] = cv.experience.splice(place.i, 1); done.push(`Removed the job ${[x.role, x.company].filter(Boolean).join(' at ')}`); }
-      else unclear.push(`${raw} (no job at "${m[1]}" on the CV)`);
+      else unclear.push(`${raw} — I don't see a job called "${m[1]}" on this CV.`);
       continue;
     }
     if ((m = line.match(/^add\s+(?:a\s+|another\s+|my\s+)?(?:job|role|position|experience)\s*:?\s*(.+)$/i)) && parseJob(m[1])) {
@@ -1746,10 +2073,16 @@ export function applyInstructions(input, text, { whole = false } = {}) {
       done.push(`Added the project ${m[1].trim()}`);
       continue;
     }
-    // "Improve the points of experience", "make my Brightloop points stronger"
+    // "Improve the points of experience", "make my Brightloop points stronger", "add more
+    // experience", "update the CV to have more changes in the experiences": all vague
+    // requests for "more" in the experience section, with no specific content given, are
+    // handled the same safe way — tightened wording, stronger verbs and a measured result
+    // in each point — rather than inventing facts or being misread as something else.
     if (!/\bsummary\b|\bheadline\b|\btitle\b/i.test(line)
-      && /^(?:improve|strengthen|enhance|polish|optimi[sz]e|refine|upgrade|tighten|boost|rework|redo|rewrite|better)\b|^make\b.*\b(?:better|stronger|more impactful|more professional|sharper|punchier)\b/i.test(line)
-      && /\b(?:points?|bullets?|experiences?|achievements?|work history|jobs?|roles?|cv|resume|it|everything)\b/i.test(line)) {
+      && (/^(?:improve|strengthen|enhance|polish|optimi[sz]e|refine|upgrade|tighten|boost|rework|redo|rewrite|better)\b|^make\b.*\b(?:better|stronger|more impactful|more professional|sharper|punchier)\b/i.test(line)
+        && /\b(?:points?|bullets?|experiences?|achievements?|work history|jobs?|roles?|cv|resume|it|everything)\b/i.test(line)
+        || (!/\bskills?\b|\bkeywords?\b|\btechnolog(?:y|ies)\b|\btools?\b/i.test(line) && /^(?:add|give|put|update|change|make)\b.*\bmore\b.*\b(?:experiences?|points?|bullets?|achievements?|work history|changes?|details?|content|information)\b/i.test(line))
+        || (!/\bskills?\b|\bkeywords?\b|\btechnolog(?:y|ies)\b|\btools?\b/i.test(line) && /^(?:update|change)\b.*\b(?:cv|resume|profile)\b.*\b(?:more|some more)\b.*\b(?:experiences?|points?|bullets?|changes?|details?)\b/i.test(line)))) {
       const named = cv.experience.filter(x => x.company && x.company.length >= 3 && new RegExp(`\\b${escapeRe(x.company)}\\b`, 'i').test(line));
       const jobs = named.length ? named : cv.experience;
       const n = improvePoints(cv, jobs);
@@ -1798,13 +2131,22 @@ export function applyInstructions(input, text, { whole = false } = {}) {
       && !/^(?:focus|highlight|emphasi[sz]e|mention|include|be|sound|show|talk|say|reflect|cover|stress|feature|lead|read|look|more|less|better|shorter|longer|make)\b/i.test(m[1])) { cv.summary = m[1].trim().replace(/^["“']|["”']$/g, ''); done.push('Replaced your summary'); continue; }
     if ((m = line.match(/^add\s+(?:(?:a\s+)?(?:line|sentence)\s+)?to\s+(?:my\s+|the\s+)?summary\s*:?\s*(.+)$/i))) { const add = cleanPoint(m[1]); cv.summary = `${cv.summary.trim()} ${add}`.trim(); done.push(`Added to your summary: "${add}"`); continue; }
     // Skills
-    if ((m = line.match(/^(?:add|include)\s+(?:these\s+|the\s+|my\s+)?(?:skills?|tools?|technolog(?:y|ies)|tech)\s*:?\s*(.+)$/i)) || (m = line.match(/^(?:add|include)\s+(.+?)\s+(?:to|in)\s+(?:my\s+|the\s+)?skills(?:\s+section)?\.?$/i))) { addSkills(cv, m[1], done, skills); continue; }
+    if ((m = line.match(/^(?:add|include)\s+(?:these\s+|the\s+|my\s+)?(?:skills?|tools?|technolog(?:y|ies)|tech)\s*:?\s*(.+)$/i)) || (m = line.match(/^(?:add|include)\s+(.+?)\s+(?:to|in)\s+(?:my\s+|the\s+)?skills(?:\s+section)?\.?$/i))) { addSkills(cv, m[1], done, skills, unclear, raw, jdTerms); continue; }
     // Certifications and education
-    if ((m = line.match(/^add\s+(?:a\s+|my\s+)?(?:certification|certificate|cert)\s*:?\s*(.+)$/i))) { cv.certifications.push(m[1].trim().replace(/[.]$/, '')); done.push(`Added the certification "${m[1].trim().replace(/[.]$/, '')}"`); continue; }
+    if ((m = line.match(/^add\s+(?:a\s+|my\s+)?(?:certification|certificate|cert)\s*:?\s*(.+)$/i))) {
+      const name = extractCertName(m[1]);
+      if (looksLikeCertName(name)) { cv.certifications.push(name.replace(/[.]$/, '')); done.push(`Added the certification "${name.replace(/[.]$/, '')}"`); }
+      else unclear.push(`${raw} — I only add certifications you name, so nothing untrue ends up on the CV. Write e.g. "Add certification: AWS Certified Developer – Associate" for one you actually hold.`);
+      continue;
+    }
     if ((m = line.match(/^add\s+(?:a\s+|my\s+)?(?:degree|education)\s*:?\s*(.+)$/i))) {
-      const parts = m[1].split(/\s*[|]\s*|\s*,\s*/).map(x => x.trim());
-      cv.education.push({ degree: parts[0] || '', school: parts[1] || '', period: parts[2] || '' });
-      done.push(`Added education: ${parts.filter(Boolean).join(', ')}`);
+      // the documented "Degree | School | Period" or "Degree, School, Period" format, when
+      // each part is actually short enough to be a field and not a stray comma in a sentence
+      const parts = m[1].split(/\s*[|]\s*|\s*,\s*/).map(x => x.trim()).filter(Boolean);
+      const looksClean = parts.length >= 2 && parts.length <= 3 && parts.every(p => p.split(/\s+/).length <= 6);
+      const [degree, school, period] = looksClean ? parts : (() => { const d = parseDegreeText(m[1]); return [d.degree, d.school, d.period]; })();
+      cv.education.push({ degree: degree || '', school: school || '', period: period || '' });
+      done.push(`Added education: ${[degree, school, period].filter(Boolean).join(', ')}`);
       continue;
     }
     // Remove something
@@ -1817,17 +2159,60 @@ export function applyInstructions(input, text, { whole = false } = {}) {
     if ((m = line.match(/^(?:add|include|put|write)\s+(?:a\s+|this\s+|the\s+|one\s+)?(?:new\s+)?(?:point|bullet|line|achievement|experience)?\s*(?:under|to|in|for|at|into)\s+(.+?)\s*(?::|\s-\s|\s–\s|\s—\s|,\s*(?:that|saying)?\s*|\s+that\s+|\s+saying\s+)\s*(.+)$/i))
       || (m = line.match(/^(?:under|in|at|for)\s+(.+?)\s*[,:]?\s+(?:add|include|write)\s*(?:a\s+)?(?:point|bullet|line)?\s*:?\s*(.+)$/i))) {
       const place = findPlace(cv, m[1]);
-      if (place) addPoint(cv, place, m[2], done);
-      else unclear.push(`${raw} (no job or project called "${m[1]}" on the CV)`);
+      let drafted;
+      if (!place) unclear.push(`${raw} — I don't see a job or project called "${m[1]}" on this CV.`);
+      // a real achievement is added as written; a bare topic gets a drafted, ~marked
+      // point (edit the estimate); anything else is declined rather than guessed at
+      else if (looksLikePoint(m[2])) addPoint(cv, place, m[2], done);
+      else if ((drafted = draftPointFromTopic(m[2]))) addPoint(cv, place, drafted, done, '(a draft — edit the ~estimate to your real number)');
+      else unclear.push(`${raw} — tell me what actually happened there, e.g. "under ${m[1]} add: led the migration to Kubernetes, cutting deploy time by 30%".`);
       continue;
     }
     if ((m = line.match(/^add\s+(?:a\s+|another\s+|one\s+)?(?:new\s+)?(?:point|bullet|line|achievement)\s*:?\s*(.+)$/i))) {
-      if (cv.experience.length) addPoint(cv, { kind: 'exp', i: 0 }, m[1], done); else unclear.push(raw);
+      let drafted;
+      if (!cv.experience.length) unclear.push(`${raw} — there's no work experience on this CV yet to add a point to.`);
+      else if (looksLikePoint(m[1])) addPoint(cv, bestJobFor(cv, m[1]), m[1], done);
+      else if ((drafted = draftPointFromTopic(m[1]))) addPoint(cv, bestJobFor(cv, m[1]), drafted, done, '(a draft — edit the ~estimate to your real number)');
+      else unclear.push(`${raw} — tell me what actually happened, e.g. "add a point: led the on-call rotation and cut incident response time by 30%".`);
       continue;
     }
-    // "Replace 40,000 with 45,000", "change Paywise to Paywise Ltd" (no quotes)
-    if ((m = line.match(/^(?:replace|change|swap|update|edit)\s+(.+?)\s+(?:with|to|into|by)\s+(.+)$/i))) {
-      replaceText(cv, m[1].trim().replace(/^["“']|["”']$/g, ''), m[2].trim().replace(/^["“']|["”']$/g, '').replace(/[.]$/, ''), done, unclear, raw);
+    // "Replace 40,000 with 45,000", "change Paywise to Paywise Ltd" (no quotes). This only
+    // fires when the "from" text is a specific snippet that's actually on the CV — never a
+    // vague instruction word ("CV", "resume", "experience", "it"), so a sentence like
+    // "update CV to have more changes" isn't misread as a find-and-replace request.
+    if ((m = line.match(/^(?:replace|change|swap|update|edit)\s+(.+?)\s+(?:with|to|into|by)\s+(.+)$/i))
+      || (m = line.match(/^swap\s+(.+?)\s+for\s+(.+)$/i))) {
+      const from = m[1].trim().replace(/^["“']|["”']$/g, '');
+      const META_TARGET = /^(?:cv|resume|profile|summary|headline|title|skills?|experiences?|points?|bullets?|section|everything|it|this|that|things?)$/i;
+      // a plain substring check (not word-boundary regex, which trips over "+" and other
+      // punctuation in things like "10,000+"): is this text actually on the CV at all?
+      const foundOnCv = from.length >= 2 && JSON.stringify(cv).toLowerCase().includes(from.toLowerCase());
+      // a trailing "in my dashboard point" / "under Paywise" clause says where, not what
+      // the new text should say — it's dropped, never folded into the replacement
+      const to = m[2].trim().replace(/^["“']|["”']$/g, '').replace(/[.]$/, '')
+        .replace(/\s+(?:in|under|on|at|for)\s+(?:my\s+|the\s+)?[\w .&'-]*?\b(?:point|bullet|line|job|role|summary|experience)s?$/i, '')
+        // "swap X for Y everywhere/throughout" — the trailing word says how many to change
+        // (handled by replaceText already, which replaces every match), not part of Y
+        .replace(/\s+(?:everywhere|throughout|globally)$/i, '');
+      if (!META_TARGET.test(from) && foundOnCv) {
+        replaceText(cv, from, to, done, unclear, raw);
+        continue;
+      }
+      // else: not a real replace request — fall through to the other rules below
+    }
+    // "Add (some more) skills into my experience / points": woven into related points
+    if (/\bskills?|keywords?|technolog(?:y|ies)|tools?\b/i.test(line) && /\b(?:experiences?|points?|bullets?|jobs?|roles?|work history)\b/i.test(line)
+      && /^(?:add|put|include|insert|weave|work|mention|show|use|bring|(?:some\s+)?more\b)/i.test(line)) {
+      weaveSkills(cv, jdTerms, done);
+      continue;
+    }
+    // "Add some more skills", "make improvements in the skills section", "improve my
+    // skills" — no names given: only what the CV's own points and projects already
+    // demonstrate is added (never invented)
+    if (!/[:]/.test(line) && /\bskills?\b/i.test(line)
+      && (/^(?:add|put|include|insert)\s+(?:a\s+few\s+|some\s+|any\s+|more\s+|additional\s+|extra\s+)*(?:more\s+|additional\s+|extra\s+)?skills?\b/i.test(line)
+        || /^(?:make\s+(?:some\s+|a\s+few\s+)?improvements?|improve|enhance|update|work on|strengthen|boost|better|polish)\b/i.test(line))) {
+      addMissingListedSkills(cv, jdTerms, done, skills);
       continue;
     }
     // "Add Kafka", "add mentored 3 juniors to my Brightloop job", "add X to my summary"
@@ -1839,10 +2224,17 @@ export function applyInstructions(input, text, { whole = false } = {}) {
       if (tail && /^summary$/i.test(tail[2])) { const a = cleanPoint(tail[1]); cv.summary = `${cv.summary.trim()} ${a}`.trim(); done.push(`Added to your summary: "${a}"`); continue; }
       if (tail && /^certifications?$/i.test(tail[2])) { cv.certifications.push(tail[1].replace(/[.]$/, '')); done.push(`Added the certification "${tail[1].replace(/[.]$/, '')}"`); continue; }
       const place = tail && findPlace(cv, tail[2]);
-      if (place) { addPoint(cv, place, tail[1], done); continue; }
+      let drafted;
+      // only add it as a real achievement; never paste the request itself onto the CV —
+      // a bare topic still gets a drafted, ~marked point rather than being refused outright
+      if (place && looksLikePoint(tail[1])) { addPoint(cv, place, tail[1], done); continue; }
+      if (place && (drafted = draftPointFromTopic(tail[1]))) { addPoint(cv, place, drafted, done, '(a draft — edit the ~estimate to your real number)'); continue; }
       const items = body.split(/\s*(?:,|;|\band\b|&)\s*/i).filter(Boolean);
       if (items.every(it => TERMS.some(t => t.name.toLowerCase() === skillName(it).toLowerCase()))) { addSkills(cv, body, done, skills); continue; }
-      if (cv.experience.length && body.split(/\s+/).length >= 4) { addPoint(cv, { kind: 'exp', i: 0 }, body, done); continue; }
+      // a point (something done) goes under the job it fits best; an instruction is not a point
+      if (cv.experience.length && looksLikePoint(body)) { addPoint(cv, bestJobFor(cv, body), body, done); continue; }
+      if (!place && cv.experience.length && (drafted = draftPointFromTopic(body))) { addPoint(cv, bestJobFor(cv, body), drafted, done, '(a draft — edit the ~estimate to your real number)'); continue; }
+      if (place) { unclear.push(`${raw} — I can add real achievements to a job, but "${tail[1]}" doesn't read like something you actually did. Tell me what happened, e.g. "built…", "led…", "cut…".`); continue; }
     }
     // Plain sentence about a job on the CV: "At Brightloop I migrated 12 services to Kubernetes"
     const named = cv.experience.findIndex(x => x.company && x.company.length >= 3 && new RegExp(`\\b${escapeRe(x.company)}\\b`, 'i').test(line));
@@ -1851,8 +2243,10 @@ export function applyInstructions(input, text, { whole = false } = {}) {
       const rest = line
         .replace(new RegExp(`^(?:at|in|for|with|while at|during my time at|when i was at|when i worked at)\\s+(?:my\\s+|the\\s+)?${company}(?:\\s+(?:job|role|position|team))?\\s*,?\\s*`, 'i'), '')
         .replace(new RegExp(`\\s+(?:at|in|for|with)\\s+(?:my\\s+|the\\s+)?${company}(?:\\s+(?:job|role|position|team))?\\b`, 'i'), '');
-      addPoint(cv, { kind: 'exp', i: named }, rest, done);
-      continue;
+      // the company is only named in passing ("Brightloop was a great place to work") —
+      // let it fall through to the rules below (or the final clarifying message) rather
+      // than pasting the whole sentence on as if it were an achievement
+      if (looksLikePoint(rest)) { addPoint(cv, { kind: 'exp', i: named }, rest, done); continue; }
     }
     // "Make my Kubernetes experience stand out", "highlight my AWS work": points about it go
     // to the top of each job and the skill to the front of its group
@@ -1872,7 +2266,7 @@ export function applyInstructions(input, text, { whole = false } = {}) {
       for (const g of cv.skills) { const hit = g.items.filter(i => i.name.toLowerCase() === key); if (hit.length) g.items = [...hit, ...g.items.filter(i => i.name.toLowerCase() !== key)]; }
       const anyPoint = cv.experience.some(x => x.bullets.some(about));
       if (anyPoint) done.push(`Put your ${skillName(m[1])} work first: ${moved ? `points about it now lead in ${moved} job${moved > 1 ? 's' : ''}` : 'it already leads'}, and ${skillName(m[1])} is first in its skill group`);
-      else unclear.push(`${raw} (no point mentions ${skillName(m[1])}; add one with "Under <job> add: …")`);
+      else unclear.push(`${raw} — none of your points mention ${skillName(m[1])} yet. Add one first, e.g. "Under <job> add: …".`);
       continue;
     }
     // "I don't use MongoDB anymore", "I no longer work with PHP": take the skill out
@@ -1888,12 +2282,131 @@ export function applyInstructions(input, text, { whole = false } = {}) {
     // A sentence that starts with something done ("Built …", "I led …"): the latest job
     // (past tense only: "make it nicer" is a request, not something done)
     const first = (line.replace(/^(?:I|we)\s+(?:have\s+|also\s+)?/i, '').match(/^[A-Za-z-]+/) || [''])[0].toLowerCase().split('-').pop();
-    if (cv.experience.length && !WEAK_OPENERS.test(line) && (PAST_VERBS.has(first) || (/[a-z]{3,}ed$/.test(first) && !/eed$/.test(first)))) { addPoint(cv, { kind: 'exp', i: 0 }, line, done); continue; }
-    unclear.push(raw);
+    // Ends in "-ed" is not enough on its own ("Added useful stuff here" starts that way
+    // too) — looksLikePoint also rejects filler with nothing concrete named.
+    if (cv.experience.length && !WEAK_OPENERS.test(line) && (PAST_VERBS.has(first) || (/[a-z]{3,}ed$/.test(first) && !/eed$/.test(first))) && looksLikePoint(line)) { addPoint(cv, bestJobFor(cv, line), line, done); continue; }
+    unclear.push(`${raw} — I'm not sure what to change. Try describing exactly what you did (e.g. "led a team of 4 engineers"), or say what to add, remove or improve and where (e.g. "improve my Paywise points", "remove the point about billing").`);
   }
   // the lines themselves (without notes), for a smarter pass when Claude is set up
-  const pending = lines.filter(l => unclear.some(u => u === l || u.startsWith(`${l} (`)));
+  // format-agnostic: every unclear message starts with the original line it's about
+  const pending = lines.filter(l => unclear.some(u => u === l || u.startsWith(l)));
   return { cv, done, unclear, skills, pending };
+}
+
+// ---------- A box in each Edit CV section ----------
+// What's typed in one section's box changes that section only (one job, one project, the
+// summary, the skills…). The request is read in that section's terms ("improve these
+// points" in a job's box improves that job), applied to a CV holding just that section,
+// and only that section's fields are merged back.
+
+const SCOPE_FIELDS = {
+  personal: ['name', 'headline', 'email', 'phone', 'location', 'linkedin', 'github', 'tagline'],
+  summary: ['summary'],
+  skills: ['skills'],
+  education: ['education'],
+  certifications: ['certifications']
+};
+
+/** The part of the CV a section's box works on. */
+export function scopeCV(input, scope) {
+  const cv = normalizeCV(input);
+  const s = scope || {};
+  if (s.section === 'experience') return { ...cv, experience: cv.experience[s.index] ? [cv.experience[s.index]] : [], projects: [] };
+  if (s.section === 'projects') return { ...cv, experience: [], projects: cv.projects[s.index] ? [cv.projects[s.index]] : [] };
+  return { ...cv, experience: [], projects: [] };
+}
+
+/** The section's changes put back into the whole CV (nothing outside it changes). */
+export function mergeScoped(input, part, scope) {
+  const cv = normalizeCV(input);
+  const s = scope || {};
+  if (s.section === 'experience' || s.section === 'projects') {
+    const list = cv[s.section].slice();
+    if (part[s.section].length) list[s.index] = part[s.section][0]; else list.splice(s.index, 1);
+    // skills named for a job ("add Kafka here") also reach the skills section
+    return { ...cv, [s.section]: list, skills: part.skills };
+  }
+  const out = { ...cv };
+  for (const f of SCOPE_FIELDS[s.section] || []) out[f] = part[f];
+  return out;
+}
+
+const IMPROVE_WORD = /^(?:improve|strengthen|enhance|polish|optimi[sz]e|refine|tighten|rewrite|redo|rework|better|upgrade|boost|make\s+(?:it|them|these)\s+(?:better|stronger|more impactful))\b/i;
+
+/** A request typed in a section's box, in that section's terms. */
+export function scopeText(text, scope, input) {
+  const cv = normalizeCV(input);
+  const s = scope || {};
+  const job = s.section === 'experience' ? cv.experience[s.index] : null;
+  const project = s.section === 'projects' ? cv.projects[s.index] : null;
+  const name = job ? (job.company || job.role) : project ? project.name : '';
+  return String(text || '').split(/\n+/).map(raw => {
+    const l = normalizeRequest(raw);
+    if (!l) return '';
+    let m;
+    if (job) {
+      if (/\b(?:skills?|keywords?|tools?|technolog(?:y|ies))\b/i.test(l) && /^(?:add|put|include|weave|work|mention|show|use|more|some)\b/i.test(l)) return 'add more skills into my experience';
+      if (/\b(?:numbers?|metrics?|achievements?|quantif\w*|measurable)\b/i.test(l) && !/["“]/.test(l)) return 'add realistic achievements';
+      if (IMPROVE_WORD.test(l) && !/["“:]/.test(l)) return 'improve the points of experience';
+      if (/^(?:make\s+(?:it|them|these)\s+)?(?:shorter|shorten|trim|condense|concise|tighten)\b/i.test(l)) return 'shorten my points';
+      if ((m = l.match(/^(?:change|set|update|rename)\s+(?:the\s+|my\s+)?(?:job\s+)?(?:title|role)\s+(?:to|as)\s+(.+)$/i))) return `change my title at ${name} to ${m[1]}`;
+      if ((m = l.match(/^(?:change|set|update)\s+(?:the\s+|my\s+)?(?:dates?|period|years?)\s+(?:to|as)\s+(.+)$/i))) return `change the dates at ${name} to ${m[1]}`;
+      if ((m = l.match(/^(?:change|rename|set)\s+(?:the\s+)?company(?:\s+name)?\s+(?:to|as)\s+(.+)$/i))) return `rename the company ${job.company} to ${m[1]}`;
+      if (/^(?:remove|delete|drop)\s+(?:this|the)\s+(?:job|role|position|experience)\.?$/i.test(l)) return `remove the job at ${name}`;
+      if ((m = l.match(/^(?:remove|delete|drop)\s+(?:the\s+)?(?:point|bullet|line)s?\s+(?:about|on|with|mentioning)?\s*(.+)$/i)) || (m = l.match(/^(?:remove|delete|drop)\s+(.+)$/i))) return `remove the point about ${m[1]}`;
+      if ((m = l.match(/^(?:add|include|write|put)\s*(?:a\s+|another\s+)?(?:new\s+)?(?:point|bullet|line|achievement)?\s*:?\s*(.+)$/i)) && looksLikePoint(m[1])) return `add a point: ${m[1]}`;
+      if (looksLikePoint(l) && !/^(?:replace|change|highlight|emphasi[sz]e|focus|make)\b/i.test(l)) return `add a point: ${l}`;
+      return l;
+    }
+    if (project) {
+      if (/^(?:remove|delete|drop)\s+(?:this|the)\s+project\.?$/i.test(l)) return `remove ${name}`;
+      if ((m = l.match(/^(?:remove|delete|drop)\s+(?:the\s+)?(?:point|bullet|line)s?\s+(?:about|on|with)?\s*(.+)$/i)) || (m = l.match(/^(?:remove|delete|drop)\s+(.+)$/i))) return `remove the point about ${m[1]}`;
+      if ((m = l.match(/^(?:add|include|write|put)\s*(?:a\s+)?(?:point|bullet|line)?\s*:?\s*(.+)$/i))) return `In ${name}, add: ${m[1]}`;
+      if (!/^(?:replace|change)\b/i.test(l) && l.split(/\s+/).length >= 3) return `In ${name}, add: ${l}`;
+      return l;
+    }
+    if (s.section === 'summary') {
+      const said = raw.trim().replace(/^(?:please\s+|also\s+)*(?:add|include|mention|say|note|write)\s+(?:that\s+)?/i, '');
+      // "I work across AI and cloud" -> "Works across AI and cloud"
+      const third = (x) => x.replace(/^I\s+(?:also\s+)?(am|have|do|[a-z]+)\b/i, (w, v) => {
+        const verb = v.toLowerCase();
+        const out = verb === 'am' ? 'Is' : verb === 'have' ? 'Has' : verb === 'do' ? 'Does' : /(?:s|sh|ch|x|z|o)$/.test(verb) ? `${verb}es` : /[^aeiou]y$/.test(verb) ? `${verb.slice(0, -1)}ies` : `${verb}s`;
+        return out[0].toUpperCase() + out.slice(1);
+      });
+      if (said !== raw.trim() || /^I\s/i.test(raw.trim())) return `add to summary: ${third(said)}`;
+      if (/^(?:make\s+(?:it|this)\s+)?(?:shorter|shorten|trim|condense|concise|tighten)\b|^shorten\b/i.test(l)) return 'make my summary shorter';
+      if ((m = l.match(/^(?:replace|change|set|rewrite)\s+(?:it|this|the summary|my summary)?\s*(?:to|with|as)\s*:?\s*(.+)$/i)) && !/^(?:focus|highlight|be|sound|mention|include)\b/i.test(m[1])) return `change summary to: ${m[1]}`;
+      if ((m = l.match(/^(?:add|include|mention|say|note)\s+(?:that\s+)?(.+)$/i))) return `add to summary: ${m[1]}`;
+      if ((m = l.match(/^(?:focus on|highlight|emphasi[sz]e|lead with|talk about|more about|stress)\s+(.+)$/i))) return `my summary should focus on ${m[1]}`;
+      if (!IMPROVE_WORD.test(l) && l.split(/\s+/).length >= 8 && looksLikePoint(l)) return `add to summary: ${l}`;
+      return /\bsummary\b/i.test(l) ? l : `${l} (in my summary)`;
+    }
+    if (s.section === 'skills') {
+      if ((m = l.match(/^(?:remove|delete|drop)\s+(.+)$/i))) return m[1].split(/\s*(?:,|\band\b|&)\s*/i).filter(Boolean).map(x => `remove ${x}`).join('\n');
+      if ((m = l.match(/^(?:add|include|put|list)\s+(?:skills?\s*:?\s*)?(.+?)(?:\s+(?:to|in)\s+(?:my\s+|the\s+)?skills)?$/i))) return `add skills: ${m[1]}`;
+      if (l.split(/\s*,\s*/).length > 1 || l.split(/\s+/).length <= 3) return `add skills: ${l}`;
+      return l;
+    }
+    if (s.section === 'certifications') {
+      if (/^(?:remove|delete|drop)\b/i.test(l)) return l;
+      // only a real, named certification is ever added here — a vague request ("add a
+      // relevant certification") or a correction to an existing one must never be read as
+      // a new (and possibly fabricated) credential
+      if (/^(?:fix|correct|change|update|edit)\b/i.test(l) && !/^(?:add|include)\b/i.test(l)) return l;
+      const body = (m = l.match(/^(?:add|include|list)\s*(?:a\s+)?(?:certification|certificate|cert)?\s*:?\s*(.+)$/i)) ? m[1] : l;
+      const name = extractCertName(body);
+      return looksLikeCertName(name) ? `add certification: ${name}` : l;
+    }
+    if (s.section === 'education') {
+      if (/^(?:remove|delete|drop)\b/i.test(l)) return l;
+      // a correction to the existing entry ("fix the typo…", "it should say…") is not a
+      // new degree — never create one from a sentence like that
+      if (/^(?:fix|correct|change|update|edit)\b/i.test(l) && !/^(?:add|include)\b/i.test(l)) return l;
+      if ((m = l.match(/^(?:add|include)\s*(?:a\s+)?(?:degree|education)?\s*:?\s*(.+)$/i))) return `add degree: ${m[1]}`;
+      return `add degree: ${l}`;
+    }
+    return l;
+  }).filter(Boolean).join('\n');
 }
 
 /** One bullet against the XYZ formula: { x: action verb, y: measured result, z: method }. */

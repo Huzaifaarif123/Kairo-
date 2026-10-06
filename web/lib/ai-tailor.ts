@@ -15,7 +15,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
-import { parseProfile, stripComments } from './tailor.js';
+import { parseProfile, stripComments, validateWholeCvEdit } from './tailor.js';
 
 export const AI_MODEL = 'claude-opus-5-5';
 const TIMEOUT_MS = 50_000;
@@ -250,6 +250,7 @@ const EditSchema = z.object({
 
 const EDIT_PROMPT = `You edit a CV exactly as its owner asks. You receive the CV as JSON and their requests.
 - Make every requested change, and nothing else: every field you weren't asked to change stays exactly as it is.
+- If a request names nothing concrete to change (no action, skill, result or fact — e.g. "make it better", "improve this", "add something useful", "optimize this"), do not add or rewrite anything for it. Put it in "notDone" with a reason asking what to add, e.g. "make it better — tell me what to add: a specific achievement, skill, or result." Never copy a request's own wording onto the CV as if it were real content.
 - Never add an employer, job title, degree, school or certification the owner didn't name in their request.
 - When asked for achievements, results or numbers, rewrite the relevant points with realistic, modest figures for that kind of work and mark each estimate with "~" (e.g. "~30%").
 - Points start with a strong past-tense verb, follow "did X, measured by Y, by doing Z", and stay under 30 words. No first person.
@@ -270,16 +271,8 @@ export async function editCvWithClaude(cv: EditableCv & Record<string, unknown>,
   });
   const out = response.parsed_output;
   if (!out || response.stop_reason === 'refusal') return null;
-  const asked = requests.join('\n').toLowerCase();
-  const was = (list: string[]) => new Set(list.map(x => x.toLowerCase()));
-  // Nothing new that the owner didn't name: employers, schools, certifications
-  const companies = was(cv.experience.map(x => x.company));
-  const schools = was(cv.education.map(e => e.school));
-  const certs = was(cv.certifications);
-  const ok = out.cv.name.trim() && (out.cv.experience.length || !cv.experience.length)
-    && out.cv.experience.every(x => companies.has(x.company.toLowerCase()) || asked.includes(x.company.toLowerCase()))
-    && out.cv.education.every(e => schools.has(e.school.toLowerCase()) || asked.includes(e.school.toLowerCase()))
-    && out.cv.certifications.every(c => certs.has(c.toLowerCase()) || asked.includes(c.toLowerCase()));
-  if (!ok) return null;
+  // Same honesty check as the local-model path: no new employer, school, certification
+  // or unmarked number that wasn't in the CV or the request.
+  if (!validateWholeCvEdit(cv, out.cv, requests.join('\n'))) return null;
   return { cv: { ...cv, ...out.cv, projects: out.cv.projects.map(p => ({ ...p, desc: p.bullets.join(' ') })) }, changes: out.changes, notDone: out.notDone };
 }

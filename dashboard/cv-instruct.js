@@ -78,7 +78,8 @@ async function applyInstruct(button) {
     const res = await fetch(apiUrl('/api/cv/instruct'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cv: tailorWs.cv, text: changes.join('\n') })
+      // the job too, so changes can be tailored to it
+      body: JSON.stringify({ cv: tailorWs.cv, text: changes.join('\n'), job: { title: document.getElementById('tailor-title').value.trim(), description: document.getElementById('tailor-desc').value.trim() } })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Could not apply that');
@@ -91,12 +92,12 @@ async function applyInstruct(button) {
       if (!document.getElementById('tailor-edit-card').hidden) renderEditor(tailorWs);
       cveRender(tailorWs, 0);
     }
-    // Keep only what wasn't understood in the box, to fix and try again
-    box.value = data.unclear.join('\n');
+    // Keep only the original request (not the explanation) in the box, to fix and try again
+    box.value = (data.pending && data.pending.length ? data.pending : data.unclear).join('\n');
     setInstructResult(
       summaryNote + questions.map(q => `<div class="instruct-answer"><strong>${escapeHtml(q)}</strong><p>${answerInstructQuestion(q)}</p></div>`).join('')
       + (data.done.length ? `<ul class="instruct-done">${data.done.map(d => `<li>${escapeHtml(d)}</li>`).join('')}</ul>` : '')
-      + (data.unclear.length ? `<div class="instruct-unclear"><strong>Not changed</strong> (left in the box): ${data.unclear.map(u => escapeHtml(u)).join('; ')}. ${data.ai ? 'Try saying it another way, or more specifically (which job, which words).' : 'Write it like the examples under "What can I write?". Other wording is understood when the local AI (Ollama) is running or an Anthropic API key is added.'}</div>` : ''));
+      + (data.unclear.length ? `<div class="instruct-unclear"><strong>Not changed</strong> (left in the box):<ul>${data.unclear.map(u => `<li>${escapeHtml(u)}</li>`).join('')}</ul>${data.ai ? 'Try describing it a different way — say exactly what you did, or name the job or section.' : 'Try one of the examples below. For anything else, I need the local AI (Ollama) running, or an Anthropic API key added.'}</div>` : ''));
   } catch (err) {
     showToast(err.message || 'Could not reach the server');
   } finally {

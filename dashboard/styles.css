@@ -1243,7 +1243,17 @@ textarea.textarea-sm { min-height: 88px; }
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  white-space: pre-line;
 }
+
+.meta .followup { color: color-mix(in srgb, var(--warn) 85%, var(--text)); }
+
+/* Pipeline card: "Ask AI" */
+.tracker-ai { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: grid; gap: 6px; }
+.tracker-ai-box { width: 100%; box-sizing: border-box; height: auto; min-height: 36px; resize: vertical; font: inherit; font-size: 12.5px; padding: 6px 8px; }
+.tracker-ai-row { display: flex; justify-content: flex-end; }
+.tracker-ai .btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
+.tracker-ai .instruct-note { font-size: 12px; }
 
 .meta {
   display: flex;
