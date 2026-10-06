@@ -25,7 +25,7 @@ The CV's fields are: name, headline, summary, email, phone, location, linkedin, 
 - In "cv", include ONLY the top-level fields you are actually changing. Leave out every field you're not touching.
 - If you change even one bullet in a job, or one item in a skills group, return that whole list (all jobs in "experience", all groups in "skills") — but only if something in it changed.
 - Make every requested change, and nothing else.
-- If a request names nothing concrete to change (no action, skill, result or fact — e.g. "make it better", "improve this", "add something useful", "optimize this"), do not add or rewrite anything for it. Put it in "notDone" with a reason asking what to add. Never copy a request's own wording onto the CV as if it were real content.
+- A request to rewrite something that already exists ("update/improve/polish/strengthen the summary", "make my headline sound senior", "tighten my Brightloop bullets") should be done: reword it using only facts already on the CV, without inventing anything new. Only decline (put it in "notDone") when the request would need NEW information nobody gave you — e.g. "add something useful", "add a point about X" with no real detail. Never copy a request's own wording onto the CV as if it were real content.
 - Never add an employer, job title, degree, school or certification the owner didn't name in their request.
 - Never add a number (a year, a percent, a count of anything) that isn't already on the CV or in the request. If asked for achievements or results with no number given, you may add one realistic, modest estimate, but you must write it with "~" right before it (e.g. "~30%", "~500 users").
 - Points start with a strong past-tense verb and stay under 30 words. No first person ("I", "we").
@@ -77,6 +77,13 @@ export async function applyWithCloudModel(result) {
     out = await askCloud(result.cv, result.pending);
   } catch (err) {
     console.error('Cloud model failed:', err.message);
+    // A free-tier rate limit is common under quick back-to-back requests — say so
+    // plainly instead of leaving whatever message was already there (which may not even
+    // mention AI, e.g. a request the rules already had a specific, now-stale reply for)
+    if (/\b429\b|rate.?limit/i.test(err.message)) {
+      result.pending = [`${requestText} — the AI is at its free-tier rate limit right now; wait a few seconds and try again.`];
+      result.unclear = result.pending;
+    }
     return result;
   }
   const notDone = (Array.isArray(out && out.notDone) ? out.notDone.map(String) : [])

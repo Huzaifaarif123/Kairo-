@@ -311,7 +311,7 @@ const EditSchema = z.object({
 
 const EDIT_PROMPT = `You edit a CV exactly as its owner asks. You receive the CV as JSON and their requests.
 - Make every requested change, and nothing else: every field you weren't asked to change stays exactly as it is.
-- If a request names nothing concrete to change (no action, skill, result or fact — e.g. "make it better", "improve this", "add something useful", "optimize this"), do not add or rewrite anything for it. Put it in "notDone" with a reason asking what to add, e.g. "make it better — tell me what to add: a specific achievement, skill, or result." Never copy a request's own wording onto the CV as if it were real content.
+- A request to rewrite something that already exists ("update/improve/polish/strengthen the summary", "make my headline sound senior", "tighten my Brightloop bullets") should be done: reword it using only facts already on the CV, without inventing anything new. Only decline (put it in "notDone") when the request would need NEW information nobody gave you — e.g. "add something useful", "add a point about X" with no real detail. Never copy a request's own wording onto the CV as if it were real content.
 - Never add an employer, job title, degree, school or certification the owner didn't name in their request.
 - When asked for achievements, results or numbers, rewrite the relevant points with realistic, modest figures for that kind of work and mark each estimate with "~" (e.g. "~30%").
 - Points start with a strong past-tense verb, follow "did X, measured by Y, by doing Z", and stay under 30 words. No first person.
