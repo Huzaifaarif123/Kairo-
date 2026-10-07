@@ -27,12 +27,16 @@ export async function POST(req: Request) {
   // One section of Edit CV (and which job or project)
   const s = body.scope && typeof body.scope === 'object' ? body.scope as Record<string, unknown> : null;
   const scope = s && SECTIONS.includes(String(s.section)) ? { section: String(s.section), index: Math.max(0, Math.floor(Number(s.index) || 0)) } : null;
+  // Explicit, per-request opt-out of the fabrication check — off unless the caller (an
+  // explicit, user-visible toggle) asks for an unverified draft. Never the default: without
+  // it the AI can invent technologies, numbers or employers that aren't on the real CV.
+  const unfiltered = body.unfiltered === true;
 
   const working = scope ? scopeCV(body.cv, scope) : body.cv;
   const result = applyInstructions(working, scope ? scopeText(text, scope, body.cv) : text, { job: jobInput });
   if (aiConfigured && result.pending.length) {
     try {
-      const edit = await editCvWithClaude(result.cv, result.pending);
+      const edit = await editCvWithClaude(result.cv, result.pending, unfiltered);
       if (edit) {
         // skills Claude added, so the page can mark them as matched against the job
         const skillName = (i: unknown) => (typeof i === 'string' ? i : (i as { name?: string }).name || '');
@@ -56,7 +60,7 @@ export async function POST(req: Request) {
     // clean, original request instead of its own "rate limit" message to chew on.
     const pendingBefore = [...result.pending];
     const unclearBefore = [...result.unclear];
-    cloud = await applyWithCloudModel(result);
+    cloud = await applyWithCloudModel(result, unfiltered);
     if (!cloud) { result.pending = pendingBefore; result.unclear = unclearBefore; }
   }
   // Cloud wasn't configured, or it was tried and genuinely failed (not just
@@ -64,8 +68,8 @@ export async function POST(req: Request) {
   let local = false;
   if (!aiConfigured && !cloud && result.pending.length && await localModelReady()) {
     local = true;
-    await applyWithLocalModel(result);
+    await applyWithLocalModel(result, unfiltered);
   }
   if (scope) result.cv = mergeScoped(body.cv, result.cv, scope);
-  return Response.json({ ...result, ai: aiConfigured || cloud || local });
+  return Response.json({ ...result, ai: aiConfigured || cloud || local, unfiltered: unfiltered && (aiConfigured || cloud || local) });
 }

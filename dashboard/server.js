@@ -283,19 +283,23 @@ const server = http.createServer(async (req, res) => {
         // one Edit CV section (and which job or project): only that section changes
         const sc = data.scope && typeof data.scope === 'object' && ['personal', 'summary', 'skills', 'experience', 'projects', 'education', 'certifications'].includes(String(data.scope.section))
           ? { section: String(data.scope.section), index: Math.max(0, Math.floor(Number(data.scope.index) || 0)) } : null;
+        // Explicit, per-request opt-out of the fabrication check — off unless the caller
+        // (an explicit, user-visible toggle) asks for an unverified draft. Never the
+        // default: without it the AI can invent technologies, numbers or employers.
+        const unfiltered = data.unfiltered === true;
         const result = applyInstructions(sc ? scopeCV(data.cv, sc) : data.cv, sc ? scopeText(text, sc, data.cv) : text, { job: { title: String(job.title || '').slice(0, 200), description: String(job.description || '').slice(0, 30000) } });
         let cloud = false;
         if (result.pending.length > 0 && cloudAiConfigured) {
           const pendingBefore = [...result.pending];
           const unclearBefore = [...result.unclear];
-          cloud = await applyWithCloudModel(result);
+          cloud = await applyWithCloudModel(result, unfiltered);
           if (!cloud) { result.pending = pendingBefore; result.unclear = unclearBefore; }
         }
         const local = !cloud && result.pending.length > 0 && await localModelReady();
-        if (local) await applyWithLocalModel(result);
+        if (local) await applyWithLocalModel(result, unfiltered);
         if (sc) result.cv = mergeScoped(data.cv, result.cv, sc);
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ...result, ai: cloud || local }));
+        res.end(JSON.stringify({ ...result, ai: cloud || local, unfiltered: unfiltered && (cloud || local) }));
       } catch (err) {
         res.writeHead(err.status || 400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));

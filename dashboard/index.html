@@ -472,6 +472,10 @@ Requirements:
                   <button class="btn btn-primary" id="tailor-instruct-apply" onclick="applyInstruct(this)">Apply to CV</button>
                   <button class="btn btn-secondary" id="tailor-instruct-undo" onclick="undoInstruct()" disabled>Undo last change</button>
                 </div>
+                <label class="instruct-unfiltered-toggle">
+                  <input type="checkbox" id="tailor-instruct-unfiltered">
+                  Skip fact-check (AI output won't be checked for invented details — review before using)
+                </label>
                 <div class="instruct-result" id="tailor-instruct-result" role="status"></div>
                 <details class="instruct-help">
                   <summary>What can I write?</summary>

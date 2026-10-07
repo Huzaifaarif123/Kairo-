@@ -15,7 +15,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
-import { parseProfile, stripComments, validateWholeCvEdit } from './tailor.js';
+import { parseProfile, stripComments, validateWholeCvEdit, hasCliche } from './tailor.js';
 import { cloudAiConfigured, chatJSON } from './cloud-llm.js';
 
 export const AI_MODEL = 'claude-sonnet-5-5';
@@ -62,7 +62,7 @@ Writing rules:
   3. "Experienced across the full <AI product / data / delivery> lifecycle, including <stages the profile shows and the posting asks for>."
   4. One sentence of proven results taken from the profile's own numbers.
 - Skills: use only these category labels, in this order, and only the ones that have relevant skills: Languages; Machine Learning; Generative AI and LLMs; AI Agents and Orchestration; RAG and Retrieval; LLM Training and Fine Tuning; Inference and Model Serving; MLOps and Evaluation; Backend and APIs; Frontend; Data Engineering; Cloud and Infrastructure; Monitoring and Observability; Testing; Databases; Design; Other Tools. Put the posting's required skills the candidate has first in each category. Leave out skills irrelevant to this posting and soft skills.
-- Bullets: rewrite the candidate's own bullets for each role, most relevant to the posting first. Follow Google's XYZ formula: "Accomplished [X] as measured by [Y], by doing [Z]": the outcome (X), the profile's own number for it (Y) and the tools or method used (Z). Start with a strong past-tense verb (present tense for a current role is fine); never start with "Responsible for", "Worked on", "Helped" or "Involved in". Work the posting's keywords in naturally where the profile supports them. When the profile states no number for a bullet, keep X and Z and do not make one up. At most 30 words each. Every role gets at least 5 bullets when the profile has that many facts for it (most recent role up to 8; next 7; then 6). When a role has fewer facts, split bullets that hold two achievements, but never pad with invented ones.
+- Bullets: rewrite the candidate's own bullets for each role, most relevant to the posting first. Follow Google's XYZ formula: "Accomplished [X] as measured by [Y], by doing [Z]": the outcome (X), the profile's own number for it (Y) and the tools or method used (Z). Start with a strong past-tense verb (present tense for a current role is fine); never start with "Responsible for", "Worked on", "Helped" or "Involved in". Work the posting's keywords in naturally where the profile supports them. When the profile states no number for a bullet, keep X and Z and do not make one up. At most 30 words each. Every role gets at least 5 bullets when the profile has that many facts for it (most recent role up to 8; next 7; then 6). When a role has fewer facts, split bullets that hold two achievements, but never pad with invented ones. No stock phrases ("team player", "results-driven", "detail-oriented", "hardworking", "self-starter", "proven track record", "passionate about" and the like) in any bullet — such content is rejected automatically.
 - The candidate's projects and education are kept exactly as the profile states them; do not add sections or content beyond what is asked for here.
 - Tailor the content, don't stuff keywords: make each bullet answer something the posting asks for, using the profile's own facts. Use the posting's wording only where the profile shows that skill, and never add a skill to a bullet that the profile doesn't tie to that work.
 - Write in plain, specific language that reads naturally to a hiring manager and passes ATS keyword matching.`;
@@ -181,7 +181,13 @@ type Cv = {
  * Applies Claude's rewrite to the rule-based CV, keeping only what passes the checks.
  * Returns the merged CV and how many parts had to fall back.
  */
-export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, allowedSkills: string[], blockedSkills: string[]) {
+/**
+ * @param unfiltered when true, skips the fabrication checks (numbersOk, hasCliche) — an
+ * explicit, user-visible opt-in for an unverified draft, never the default. Skill-source
+ * and blocked-skill checks still apply, since those reflect the candidate's own stated
+ * preferences rather than fabrication detection.
+ */
+export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, allowedSkills: string[], blockedSkills: string[], unfiltered = false) {
   const profileText = norm(stripComments(profileMd));
   const profileNumbers = new Set(numbersIn(stripComments(profileMd)));
   const allowed = new Set(allowedSkills.map(norm));
@@ -189,7 +195,8 @@ export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, allo
   const blocked = blockedSkills.map(norm).filter(b => b.length >= 3);
   let rejected = 0;
 
-  const numbersOk = (text: string) => numbersIn(text).every(n => profileNumbers.has(n) || Number(n) < 10);
+  const numbersOk = (text: string) => unfiltered || numbersIn(text).every(n => profileNumbers.has(n) || Number(n) < 10);
+  const noCliche = (text: string) => unfiltered || !hasCliche(text);
   const mentionsBlocked = (text: string) => blocked.some(b => new RegExp(`(?<![a-z0-9])${b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`).test(norm(text)));
   const skillOk = (item: string) => {
     const n = norm(item.replace(/\s*\(.*?\)\s*/g, ' '));
@@ -206,7 +213,7 @@ export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, allo
   else rejected++;
 
   const summary = rewrite.summary.trim();
-  if (summary && words(summary) <= MAX_SUMMARY_WORDS && numbersOk(summary) && !mentionsBlocked(summary)) out.summary = summary;
+  if (summary && words(summary) <= MAX_SUMMARY_WORDS && numbersOk(summary) && !mentionsBlocked(summary) && noCliche(summary)) out.summary = summary;
   else rejected++;
 
   const skills = rewrite.skills
@@ -220,7 +227,7 @@ export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, allo
     const fromClaude = rewrite.experience.find(e => e.index === i)?.bullets || [];
     const good = fromClaude
       .map(b => b.trim().replace(/^[-•*]\s*/, ''))
-      .filter(b => b && words(b) <= MAX_BULLET_WORDS && numbersOk(b) && !mentionsBlocked(b));
+      .filter(b => b && words(b) <= MAX_BULLET_WORDS && numbersOk(b) && !mentionsBlocked(b) && noCliche(b));
     rejected += fromClaude.length - good.length;
     return { ...job, bullets: (good.length ? good : job.bullets).slice(0, limit) };
   });
@@ -312,15 +319,24 @@ const EditSchema = z.object({
 const EDIT_PROMPT = `You edit a CV exactly as its owner asks. You receive the CV as JSON and their requests.
 - Make every requested change, and nothing else: every field you weren't asked to change stays exactly as it is.
 - A request to rewrite something that already exists ("update/improve/polish/strengthen the summary", "make my headline sound senior", "tighten my Brightloop bullets") should be done: reword it using only facts already on the CV, without inventing anything new. Only decline (put it in "notDone") when the request would need NEW information nobody gave you — e.g. "add something useful", "add a point about X" with no real detail. Never copy a request's own wording onto the CV as if it were real content.
+- Read the whole CV first — the role, industry, seniority, tech stack and existing bullet style — and use that context to draft real, specific wording yourself. When asked to add or expand something, write the actual content; never reply with only a request for more detail as if that were the answer.
+- Follow ATS practice: mirror the job posting's exact keyword phrasing wherever the candidate's real experience actually supports it, use standard section labels, no special characters or symbols, spell out an acronym the first time it's used.
+- Never use stock resume phrases — "team player", "results-driven", "detail-oriented", "hardworking", "self-starter", "proven track record", "excellent communication skills", "passionate about", "highly motivated" and the like. Every line names a concrete tool, method or deliverable instead; content with a stock phrase is rejected automatically regardless of what else is right about it.
 - Never add an employer, job title, degree, school or certification the owner didn't name in their request.
-- When asked for achievements, results or numbers, rewrite the relevant points with realistic, modest figures for that kind of work and mark each estimate with "~" (e.g. "~30%").
+- When asked for achievements, results or numbers, rewrite the relevant points with realistic, modest figures for that kind of work and mark each estimate with "approximately" right before it (e.g. "approximately 30%"), never as a bare, exact-looking figure.
 - Points start with a strong past-tense verb, follow "did X, measured by Y, by doing Z", and stay under 30 words. No first person.
 - Return the whole CV, a short plain-English list of what you changed, and any request you couldn't do (with why).`;
 
 type EditableCv = z.infer<typeof EditSchema>['cv'];
 
 /** Claude applies requests the rules didn't understand. Returns null if its answer fails the checks. */
-export async function editCvWithClaude(cv: EditableCv & Record<string, unknown>, requests: string[]) {
+/**
+ * @param unfiltered when true, skips the honesty check (no new employer/school/cert or
+ * unmarked number check) — the AI's raw output is trusted as-is. Off by default; only set
+ * when the caller explicitly asked for an unverified draft (an explicit, user-visible
+ * toggle, never the default), since without it the model can fabricate facts.
+ */
+export async function editCvWithClaude(cv: EditableCv & Record<string, unknown>, requests: string[], unfiltered = false) {
   const response = await getClient().beta.messages.parse({
     model: AI_MODEL,
     max_tokens: 16000,
@@ -334,7 +350,7 @@ export async function editCvWithClaude(cv: EditableCv & Record<string, unknown>,
   if (!out || response.stop_reason === 'refusal') return null;
   // Same honesty check as the local-model path: no new employer, school, certification
   // or unmarked number that wasn't in the CV or the request.
-  if (!validateWholeCvEdit(cv, out.cv, requests.join('\n'))) return null;
+  if (!unfiltered && !validateWholeCvEdit(cv, out.cv, requests.join('\n'))) return null;
   return { cv: { ...cv, ...out.cv, projects: out.cv.projects.map(p => ({ ...p, desc: p.bullets.join(' ') })) }, changes: out.changes, notDone: out.notDone };
 }
 

@@ -603,7 +603,8 @@ const LEXICON_CATEGORY = {
 // The standard category for a skill: from the lexicon term it names, otherwise from the
 // profile group it was listed under
 function categoryOf(name, fromGroup = '') {
-  const hits = TERMS.filter(t => countMatches(t.re, name) > 0);
+  const exact = TERMS.find(t => t.name.toLowerCase() === String(name || '').toLowerCase());
+  const hits = exact ? [exact] : TERMS.filter(t => countMatches(t.re, name) > 0);
   const t = hits.sort((a, b) => b.name.length - a.name.length)[0];
   if (t) {
     if (t.category === 'Ways of Working') return null; // soft skills stay out of Technical Skills
@@ -1248,6 +1249,60 @@ function joinList(list) {
   return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
 }
 
+// A resume line fits roughly this many words at normal CV width
+const WORDS_PER_LINE = 13;
+
+/**
+ * "Make the summary up to/about N lines (or words/sentences)": expands or trims the
+ * summary to roughly that length, built only from facts already on the CV — years
+ * computed from its own dates, skills it already lists, achievements already in a
+ * bullet — never invented. Always produces a real result rather than declining: when
+ * there isn't enough real content left to reach the target, it gets as close as the
+ * CV's own facts allow and says so, instead of leaving the summary untouched.
+ */
+function setSummaryLength(cv, jdTerms, targetWords, unit, done) {
+  const targetLines = unit === 'line' ? Math.round(targetWords / WORDS_PER_LINE) || 1 : null;
+  const label = targetLines ? `${targetLines} line${targetLines > 1 ? 's' : ''}` : `about ${targetWords} words`;
+  let parts = cv.summary.split(/(?<=[.!?])\s+(?=[A-Z])/).map(s => s.trim()).filter(Boolean);
+  if (words(parts.join(' ')) > targetWords) {
+    while (parts.length > 1 && words(parts.join(' ')) > targetWords) parts.pop();
+    cv.summary = parts.join(' ');
+    done.push(`Shortened your summary to about ${words(cv.summary)} words (about ${label})`);
+    return;
+  }
+  if (words(cv.summary) >= targetWords - Math.ceil(WORDS_PER_LINE / 2)) {
+    done.push(`Your summary is already about ${label} long`);
+    return;
+  }
+  let summary = cv.summary.trim();
+  const have = summary.toLowerCase();
+  const years = yearsOfExperience(cv.experience);
+  const role = (cv.headline || (cv.experience[0] && cv.experience[0].role) || '').split(/\s+[-–|:(]\s*|,\s/)[0].trim();
+  const candidates = [];
+  if (role && years && !/\byears?\b/.test(have)) candidates.push(`${role} with ${years}+ years of experience delivering production software.`);
+  const listedSkills = cv.skills.flatMap(g => g.items.map(i => i.name));
+  const jdListed = jdTerms.filter(t => listedSkills.some(n => n.toLowerCase() === t.name.toLowerCase())).map(t => t.name);
+  const skillNames = (jdListed.length ? jdListed : listedSkills).slice(0, 6).filter(n => !have.includes(n.toLowerCase()));
+  if (skillNames.length) candidates.push(`Skilled in ${joinList(skillNames)}.`);
+  let metricsUsed = 0;
+  for (const b of [...cv.experience.flatMap(x => x.bullets), ...cv.projects.flatMap(p => p.bullets || [])]) {
+    if (metricsUsed >= 2) break;
+    const phrase = metricPhrase(b);
+    if (phrase && !have.includes(phrase.toLowerCase())) { candidates.push(`Delivered measurable impact, including ${phrase}.`); metricsUsed++; }
+  }
+  let added = 0;
+  for (const c of candidates) {
+    if (words(summary) >= targetWords) break;
+    summary = `${summary} ${c}`.trim();
+    added++;
+  }
+  cv.summary = summary;
+  if (!added) { done.push("Your summary already covers everything your CV shows — add a real achievement or skill first, then I can extend it further"); return; }
+  done.push(words(summary) >= targetWords - Math.ceil(WORDS_PER_LINE / 2)
+    ? `Expanded your summary to about ${words(summary)} words (about ${label})`
+    : `Expanded your summary with what your CV already shows (about ${words(summary)} words) — add another real achievement or skill to reach the full ${label}`);
+}
+
 // ---------- Recruiter review ----------
 // Three checks run on every tailored CV:
 //   1. a senior recruiter's first read: a match score out of 100, the five most important
@@ -1286,6 +1341,23 @@ const LEAD_SYMBOLS = /^[\p{Cc}\p{Cf}\p{Co}\p{So}•●▪■◦‣∙·*\-–—
 const PRESENT_VERBS = new Set(['cut', 'set', 'own', 'win', 'take', 'drive', 'grow', 'oversee', 'spearhead', 'architect', 'partner', 'advise', 'teach', 'coach']);
 // Openers that describe duties rather than results
 const WEAK_OPENERS = /^(?:(?:was|were)\s+)?(?:responsible for|tasked with|in charge of|worked (?:on|with|in)|helped|assisted|involved in|participated in|duties included|contributed to)\b/i;
+
+// Stock resume phrases that say nothing a reader (or an ATS keyword match) can act on —
+// they survive a word-level check like WEAK_OPENERS because they aren't bullet openers,
+// just filler that can appear anywhere in a bullet or summary. Flagged as a recruiter red
+// flag (reviewCV) and hard-rejected from anything an AI backend returns
+// (validateWholeCvEdit), so a generic line can't reach the CV from either path.
+const CLICHE_ALTERNATION = 'team player|results[\\s-]driven|detail[\\s-]oriented|hard[\\s-]?working|self[\\s-]starter|go[\\s-]getter|think(?:ing)? outside the box|synerg(?:y|ies)|proven track record|excellent communication skills|(?:fast|quick) learner|passionate about|highly motivated|strong work ethic|dynamic professional|people person|wide range of|value[\\s-]add(?:ed)?|win[\\s-]win|best[\\s-]in[\\s-]class|game[\\s-]chang(?:er|ing)|out[\\s-]of[\\s-]the[\\s-]box thinking';
+const CLICHE_PHRASES = new RegExp(`\\b(?:${CLICHE_ALTERNATION})\\b`, 'i');
+// Removal (stripCliches) also absorbs a leading "a"/"an"/"as a"/"as an" right before the
+// phrase — detection (hasCliche) doesn't need this, but without it "a hardworking team
+// player" leaves a dangling "a" once the phrase itself is gone.
+const CLICHE_REMOVE_G = new RegExp(`\\b(?:as\\s+an?\\s+|an?\\s+)?(?:${CLICHE_ALTERNATION})\\b`, 'gi');
+
+/** Whether text contains a stock resume cliché rather than specific, checkable content. */
+export function hasCliche(text) {
+  return CLICHE_PHRASES.test(String(text || ''));
+}
 
 /** A bullet with a stronger opening and without filler. Facts and numbers are unchanged. */
 export function polishBullet(text) {
@@ -1517,20 +1589,64 @@ function weaveSkills(cv, jdTerms, done) {
 }
 
 /**
- * "Add some more skills" (no names given): a skill can only honestly be added when the
- * CV's own points already show it — never invented from nothing. Tools the posting asks
- * for (or, with no posting, any recognized tool) that appear in a bullet or a project's
- * tech but aren't in the skills list yet are added; there's nothing to add if everything
- * demonstrated is already listed.
+ * "Add some more skills" (no names, no topic given): preference order is 1) a tool the
+ * job posting asks for that the CV's own points/projects already demonstrate but don't
+ * list yet (promoted as-is, since it's already true), 2) any other posting-asked tool not
+ * yet listed at all (added as a standard suggestion to confirm/adjust), 3) with no posting,
+ * any recognized tool the CV already demonstrates. This always proposes something rather
+ * than a flat "nothing to add" — the honesty line stays at the bullets (never claim an
+ * achievement that didn't happen), not at suggesting a standard skill-list entry.
  */
 function addMissingListedSkills(cv, jdTerms, done, added) {
-  const work = () => [...cv.experience.flatMap(x => x.bullets), ...cv.projects.flatMap(p => (p.bullets && p.bullets.length ? p.bullets : [p.desc].filter(Boolean)).concat(p.tech || []))].join('\n');
+  const work = [...cv.experience.flatMap(x => x.bullets), ...cv.projects.flatMap(p => (p.bullets && p.bullets.length ? p.bullets : [p.desc].filter(Boolean)).concat(p.tech || []))].join('\n');
   const listed = new Set(cv.skills.flatMap(g => g.items.map(i => i.name.toLowerCase())));
-  const pool = (jdTerms.length ? jdTerms : TERMS).filter(t => t.category !== 'Ways of Working' && t.name !== 'AI'
-    && countMatches(t.re, work()) > 0 && !listed.has(t.name.toLowerCase()));
+  const notWorking = (t) => t.category !== 'Ways of Working' && t.name !== 'AI' && !listed.has(t.name.toLowerCase());
+  const evidenced = (jdTerms.length ? jdTerms : TERMS).filter(t => notWorking(t) && countMatches(t.re, work) > 0);
+  const pool = evidenced.length ? evidenced : jdTerms.filter(notWorking);
   const names = [...new Set(pool.map(t => t.name))].slice(0, 6);
-  if (names.length) addSkills(cv, names.join(', '), done, added);
-  else done.push('Nothing to add: every skill your points and projects show is already listed');
+  if (!names.length) { done.push('Every skill your points and projects show is already listed'); return; }
+  addSkills(cv, names.join(', '), done, added);
+  if (!evidenced.length) done.push("These are from the job posting, not yet shown on your CV — swap in the ones you've actually used, or add a bullet proving it");
+}
+
+// A topic word ("testing", "cloud", "backend"…) to the matching lexicon category, so
+// "add skills regarding testing" knows which pool of tools to draw from.
+const TOPIC_CATEGORY = {
+  testing: 'Testing', test: 'Testing', tests: 'Testing', qa: 'Testing', 'quality assurance': 'Testing',
+  cloud: 'Cloud and DevOps', devops: 'Cloud and DevOps', infrastructure: 'Cloud and DevOps', infra: 'Cloud and DevOps', deployment: 'Cloud and DevOps',
+  data: 'Data', database: 'Data', databases: 'Data',
+  frontend: 'Frontend', 'front-end': 'Frontend', ui: 'Frontend', 'front end': 'Frontend',
+  backend: 'Backend', 'back-end': 'Backend', 'back end': 'Backend', api: 'Backend', apis: 'Backend',
+  monitoring: 'Observability', observability: 'Observability',
+  ml: 'Machine Learning', 'machine learning': 'Machine Learning', 'deep learning': 'Machine Learning',
+  ai: 'AI and LLMs', llm: 'AI and LLMs', llms: 'AI and LLMs', genai: 'AI and LLMs', 'generative ai': 'AI and LLMs',
+  languages: 'Languages', language: 'Languages', programming: 'Languages',
+  agents: 'AI Agents and Orchestration', orchestration: 'AI Agents and Orchestration',
+  rag: 'RAG and Retrieval', retrieval: 'RAG and Retrieval'
+};
+
+/**
+ * "Add some skills regarding testing" (a topic, not specific names): unlike
+ * addMissingListedSkills, this always produces something rather than flatly refusing when
+ * nothing in that category is evidenced yet — the honesty line is drawn at the *bullets*
+ * (never claim an achievement that didn't happen), not at listing a standard tool of a kind
+ * the candidate is explicitly asking to add. Preference order: 1) what the job posting asks
+ * for in this category, 2) what the CV's own points/projects already show, 3) the category's
+ * standard tools as a sensible starting point — always something, never "nothing to add".
+ */
+function addTopicSkills(cv, jdTerms, topic, done, added) {
+  const category = TOPIC_CATEGORY[String(topic || '').toLowerCase().trim()];
+  if (!category) { addMissingListedSkills(cv, jdTerms, done, added); return; }
+  const listed = new Set(cv.skills.flatMap(g => g.items.map(i => i.name.toLowerCase())));
+  const inCategory = TERMS.filter(t => t.category === category && !listed.has(t.name.toLowerCase()));
+  const work = [...cv.experience.flatMap(x => x.bullets), ...cv.projects.flatMap(p => (p.bullets && p.bullets.length ? p.bullets : [p.desc].filter(Boolean)).concat(p.tech || []))].join('\n');
+  const fromJd = jdTerms.filter(t => t.category === category && !listed.has(t.name.toLowerCase()));
+  const evidenced = inCategory.filter(t => countMatches(t.re, work) > 0);
+  const pool = fromJd.length ? fromJd : evidenced.length ? evidenced : inCategory;
+  const names = [...new Set(pool.map(t => t.name))].slice(0, 6);
+  if (!names.length) { done.push(`Every ${category.toLowerCase()} skill is already listed`); return; }
+  addSkills(cv, names.join(', '), done, added);
+  if (!fromJd.length && !evidenced.length) done.push(`These are standard ${category.toLowerCase()} tools, not yet shown on your CV — swap in the ones you've actually used, or add a bullet proving it`);
 }
 
 const placeName = (cv, p) => (p.kind === 'exp' ? [cv.experience[p.i].role, cv.experience[p.i].company].filter(Boolean).join(' at ') : `the ${cv.projects[p.i].name} project`);
@@ -1700,23 +1816,26 @@ function replaceText(cv, from, to, done, unclear, raw) {
 }
 
 // "Add realistic achievements / numbers": every point without a number becomes a measured
-// achievement right away, with a typical, modest estimate for that kind of work (marked ~).
+// achievement right away, with a typical, modest estimate for that kind of work — spelled
+// out as "approximately" rather than a "~" character, so it reads cleanly on an exported
+// CV (a stray "~" renders as a LaTeX math symbol in the PDF) while still marking it plainly
+// as an estimate to replace with the real figure.
 const NUMBER_DRAFTS = [
-  [/\b(test(s|ing)?|jest|cypress|pytest|qa)\b/i, 'reaching ~80% test coverage'],
-  [/\b(open[- ]source|starter kit|sdk|npm package)\b/i, 'used by ~200 developers'],
-  [/\b(state management|redux|zustand|context api|accessibility|responsive)\b/i, 'cutting UI bugs by ~25%'],
-  [/\b(payments?|checkout|billing|orders?|transactions?|invoic\w*|stripe)\b/i, 'handling ~10,000 transactions a month'],
-  [/\b(ci\/cd|pipelines?|deploy\w*|releases?|github actions|gitlab ci|docker|kubernetes)\b/i, 'cutting release time by ~40%'],
-  [/\b(performance|optimi[sz]\w*|latency|faster|speed|load(ing)? time|lighthouse|caching|cache|index\w*|quer(y|ies))\b/i, 'improving response times by ~30%'],
-  [/\b(monitor\w*|observability|logging|alert\w*|sentry|grafana|datadog|prometheus|on[- ]?call|incident|outage|pager|escalat\w*)\b/i, 'cutting incident resolution time by ~35%'],
-  [/\b(automat\w*|scripts?|workflows?)\b/i, 'saving the team ~10 hours a week'],
-  [/\b(mentor\w*|led|lead|team|coach\w*|review\w*)\b/i, 'across a team of ~5 engineers'],
-  [/\b(data|etl|elt|reports?|analytics|warehouse|spark|airflow)\b/i, 'processing ~1M records a day'],
-  [/\b(apis?|services?|backend|microservices?|endpoints?|server)\b/i, 'handling ~100K requests a day'],
-  [/\b(dashboards?|ui|interfaces?|frontend|front-end|pages?|sites?|website|app|apps|screens?|components?)\b/i, 'used by ~5,000 users'],
-  [/\b(security|auth\w*|permissions?|compliance)\b/i, 'protecting ~10,000 user accounts']
+  [/\b(test(s|ing)?|jest|cypress|pytest|qa)\b/i, 'reaching approximately 80% test coverage'],
+  [/\b(open[- ]source|starter kit|sdk|npm package)\b/i, 'used by approximately 200 developers'],
+  [/\b(state management|redux|zustand|context api|accessibility|responsive)\b/i, 'cutting UI bugs by approximately 25%'],
+  [/\b(payments?|checkout|billing|orders?|transactions?|invoic\w*|stripe)\b/i, 'handling approximately 10,000 transactions a month'],
+  [/\b(ci\/cd|pipelines?|deploy\w*|releases?|github actions|gitlab ci|docker|kubernetes)\b/i, 'cutting release time by approximately 40%'],
+  [/\b(performance|optimi[sz]\w*|latency|faster|speed|load(ing)? time|lighthouse|caching|cache|index\w*|quer(y|ies))\b/i, 'improving response times by approximately 30%'],
+  [/\b(monitor\w*|observability|logging|alert\w*|sentry|grafana|datadog|prometheus|on[- ]?call|incident|outage|pager|escalat\w*)\b/i, 'cutting incident resolution time by approximately 35%'],
+  [/\b(automat\w*|scripts?|workflows?)\b/i, 'saving the team approximately 10 hours a week'],
+  [/\b(mentor\w*|led|lead|team|coach\w*|review\w*)\b/i, 'across a team of approximately 5 engineers'],
+  [/\b(data|etl|elt|reports?|analytics|warehouse|spark|airflow)\b/i, 'processing approximately 1M records a day'],
+  [/\b(apis?|services?|backend|microservices?|endpoints?|server)\b/i, 'handling approximately 100K requests a day'],
+  [/\b(dashboards?|ui|interfaces?|frontend|front-end|pages?|sites?|website|app|apps|screens?|components?)\b/i, 'used by approximately 5,000 users'],
+  [/\b(security|auth\w*|permissions?|compliance)\b/i, 'protecting approximately 10,000 user accounts']
 ];
-const DEFAULT_DRAFT = 'improving delivery speed by ~20%';
+const DEFAULT_DRAFT = 'improving delivery speed by approximately 20%';
 
 // Naming just a topic ("on call and incident response", "mentoring") rather than a
 // finished sentence is still a real request — a plausible, honestly-marked draft point is
@@ -1787,6 +1906,92 @@ function improvePoints(cv, jobs) {
   return changed;
 }
 
+/**
+ * "Each bullet point should have 2 lines" (or N words): resizes every experience bullet
+ * toward that length — a too-long bullet is trimmed the same safe way as "shorten my
+ * points" (dropping a vague trailing clause, never cutting mid-fact); a too-short bullet
+ * is strengthened the same way as "fix the red flags" (a real action verb, a measured
+ * result with a ~ estimate when the CV doesn't already give one). Always acts, even when a
+ * bullet can't fully reach the target from real content alone — that shortfall is reported,
+ * not treated as a reason to leave the bullet untouched.
+ */
+function setBulletLineLength(cv, targetWords, done) {
+  const min = Math.max(6, targetWords - Math.ceil(WORDS_PER_LINE / 2));
+  const max = targetWords + Math.ceil(WORDS_PER_LINE / 2);
+  let trimmed = 0, grown = 0, short = 0;
+  for (const x of cv.experience) {
+    x.bullets = x.bullets.map(b => {
+      if (words(b) > max) {
+        const c = b.replace(/[.\s]+$/, '').replace(VAGUE_ENDING, '');
+        let t = words(c) <= max ? c : c.split(/\s+/).slice(0, max).join(' ');
+        if (!/[.!?]$/.test(t)) t += '.';
+        if (t !== b) trimmed++;
+        return t;
+      }
+      if (words(b) < min) {
+        let t = polishBullet(b);
+        if (!hasAction(t)) t = `Delivered ${t[0].toLowerCase()}${t.slice(1)}`;
+        if (!hasMeasure(t)) t = measuredVersion(t);
+        if (t !== b) grown++;
+        if (words(t) < min) short++;
+        return t;
+      }
+      return b;
+    });
+  }
+  const lines = Math.round(targetWords / WORDS_PER_LINE) || 1;
+  const label = `about ${lines} line${lines > 1 ? 's' : ''}`;
+  if (!trimmed && !grown && !short) { done.push(`Your points are already ${label} each`); }
+  else if (trimmed || grown) {
+    const parts = [];
+    if (grown) parts.push(`strengthened ${grown} short point${grown > 1 ? 's' : ''} (marked as approximately; change them to your real numbers)`);
+    if (trimmed) parts.push(`trimmed ${trimmed} long point${trimmed > 1 ? 's' : ''} to fit`);
+    done.push(`Resized your experience points toward ${label} each: ${parts.join(' and ')}`);
+  }
+  if (short) done.push(`${short} point${short > 1 ? 's' : ''} couldn't reach ${label} from what's already on the CV — they're already a clear action and a measured result, so growing them further needs more real detail (the tool used, the scale, the context) rather than padding`);
+}
+
+/** Removes a stock phrase and tidies the punctuation/spacing left behind. */
+function stripCliches(text) {
+  let t = String(text || '');
+  if (!CLICHE_PHRASES.test(t)) return t;
+  t = t.replace(CLICHE_REMOVE_G, '')
+    .replace(/\s*,\s*,/g, ',')
+    .replace(/\s*,\s*(?:and\s+)?\./g, '.')
+    .replace(/^\s*(?:and|,)\s+/i, '')
+    .replace(/\s+,/g, ',')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([.,])/g, '$1')
+    .trim();
+  if (t && !/[.!?]$/.test(t)) t += '.';
+  if (t) t = t[0].toUpperCase() + t.slice(1);
+  return t;
+}
+
+/**
+ * "Fix what the review found": weaves in the job's missing keywords (weaveSkills),
+ * strengthens every point with the XYZ formula (improvePoints), and strips stock resume
+ * phrases (stripCliches) — the rule-engine version of rewriting the CV against the
+ * recruiter review in one pass, with no AI and nothing invented.
+ */
+function applyReviewFixes(cv, jdTerms, done) {
+  const n = improvePoints(cv, cv.experience);
+  let clichesFixed = 0;
+  for (const x of cv.experience) {
+    x.bullets = x.bullets.map(b => { const t = stripCliches(b); if (t !== b) clichesFixed++; return t; });
+  }
+  for (const p of cv.projects) {
+    if (!p.bullets) continue;
+    p.bullets = p.bullets.map(b => { const t = stripCliches(b); if (t !== b) clichesFixed++; return t; });
+    p.desc = p.bullets.join(' ');
+  }
+  if (hasCliche(cv.summary)) { cv.summary = stripCliches(cv.summary); clichesFixed++; }
+  weaveSkills(cv, jdTerms, done);
+  if (n) done.push(`Strengthened ${n} point${n > 1 ? 's' : ''}: a strong action verb, a measured result and the method used (marked as approximately; change them to your real numbers)`);
+  if (clichesFixed) done.push(`Removed ${clichesFixed} generic phrase${clichesFixed > 1 ? 's' : ''} (e.g. "team player", "results-driven") — add what you actually did in its place`);
+  if (!n && !clichesFixed) done.push('No duty-style bullets or generic phrases found to fix');
+}
+
 // Certifications that fit the skills a job asks for (named in replies; added only by name)
 const CERTIFICATIONS_FOR = {
   AWS: 'AWS Certified Developer – Associate', Azure: 'Microsoft Certified: Azure Developer Associate', GCP: 'Google Cloud Professional Cloud Developer',
@@ -1836,7 +2041,9 @@ const CONTACT_FIELD = { phone: 'phone', 'phone number': 'phone', mobile: 'phone'
 // ---------- "Say anything, the whole CV updates": checking an AI's whole-CV rewrite ----------
 // Shared by the Claude path and the local-model (Ollama) path, so both are held to the
 // same honesty rules: real jobs/schools/certifications only, and no number that wasn't
-// already on the CV, asked for in the request, or clearly marked as an estimate (~).
+// already on the CV, asked for in the request, or clearly marked as an estimate (written
+// as "approximately N", not a "~" character — a stray "~" renders oddly once it reaches
+// an exported CV, e.g. as a LaTeX math symbol in the PDF).
 
 /** Numbers as written, reduced to their digits: "2,000" and "2000" compare equal. */
 function editNumbers(s) {
@@ -1846,7 +2053,7 @@ function editNumbers(s) {
 /**
  * Whether an AI's whole-CV rewrite only did what was asked: no new employer, school or
  * certification the person didn't name, and no new number that isn't already on the CV,
- * in the request, or written as an estimate ("~30%").
+ * in the request, or written as an estimate ("approximately 30%").
  * @param {any} original the CV before the edit
  * @param {any} edited what the AI returned
  * @param {string} requestText the request(s) that were asked, joined together
@@ -1864,13 +2071,14 @@ export function validateWholeCvEdit(original, edited, requestText) {
     && (edited.education || []).every(e => schools.has(String(e.school).toLowerCase()) || asked.includes(String(e.school).toLowerCase()))
     && (edited.certifications || []).every(c => certs.has(String(c).toLowerCase()) || asked.includes(String(c).toLowerCase()));
   if (!namesOk) return false;
-  // every number in the result must already be on the CV, in the request, or marked "~"
+  // every number in the result must already be on the CV, in the request, or marked as
+  // an estimate ("approximately 30%", "about 500 users")
   const allowed = new Set([...editNumbers(JSON.stringify(original)), ...editNumbers(requestText)]);
-  const re = /(~\s?)?\b\d[\d,.]*\b/g;
+  const re = /((?:approximately|about)\s+)?\b\d[\d,.]*\b/gi;
   let m;
   const text = JSON.stringify(edited);
   while ((m = re.exec(text))) {
-    const n = m[0].replace(/^~\s?/, '').replace(/[,.]$/, '').replace(/,/g, '');
+    const n = m[0].replace(/^(?:approximately|about)\s+/i, '').replace(/[,.]$/, '').replace(/,/g, '');
     if (!allowed.has(n) && !m[1]) return false;
   }
   // A vague request ("make it better", "optimize this") must never come back as a new or
@@ -1888,6 +2096,10 @@ export function validateWholeCvEdit(original, edited, requestText) {
     edited.summary
   ].filter(Boolean);
   if (newLines.some(l => !origLines.has(norm(l)) && hasNoConcreteContent(l))) return false;
+  // Same bar as the rule engine's own generated content: no stock resume phrase in
+  // anything new or changed, from any AI backend — a cliché isn't a fabricated fact, so
+  // the checks above let it through, but it's still not real, specific content.
+  if (newLines.some(l => !origLines.has(norm(l)) && hasCliche(l))) return false;
   return true;
 }
 
@@ -1925,7 +2137,7 @@ export function applyInstructions(input, text, { whole = false, job = null } = {
         }
         if (placed) done.push(`Achievement: "${d.suggested}"`);
       }
-      if (list.length) done.unshift(`Turned ${list.length} point${list.length > 1 ? 's' : ''} into measured achievements (estimates marked ~; change any number with Replace "…" with "…")`);
+      if (list.length) done.unshift(`Turned ${list.length} point${list.length > 1 ? 's' : ''} into measured achievements (marked as approximately; change any number with Replace "…" with "…")`);
       else done.push('Every point already has a number');
       // the line may also ask for certifications
       if (!/\b(?:certifications?|certificates?|certs?)\b/i.test(line)) continue;
@@ -2073,6 +2285,15 @@ export function applyInstructions(input, text, { whole = false, job = null } = {
       done.push(`Added the project ${m[1].trim()}`);
       continue;
     }
+    // "Fix the red flags", "rewrite my experience to include the missing keywords and
+    // remove the red flags", "apply the recruiter review": the combined fix — missing
+    // keywords woven in, every point strengthened with the XYZ formula, stock phrases
+    // stripped — all in one pass, matching what the review above already found.
+    if (/\b(?:red flags?|recruiter review|the review|ats\b.*review)\b/i.test(line)
+      && /^(?:fix|address|resolve|apply|rewrite|update|clean up)\b/i.test(line)) {
+      applyReviewFixes(cv, jdTerms, done);
+      continue;
+    }
     // "Improve the points of experience", "make my Brightloop points stronger", "add more
     // experience", "update the CV to have more changes in the experiences": all vague
     // requests for "more" in the experience section, with no specific content given, are
@@ -2086,7 +2307,7 @@ export function applyInstructions(input, text, { whole = false, job = null } = {
       const named = cv.experience.filter(x => x.company && x.company.length >= 3 && new RegExp(`\\b${escapeRe(x.company)}\\b`, 'i').test(line));
       const jobs = named.length ? named : cv.experience;
       const n = improvePoints(cv, jobs);
-      done.push(n ? `Improved ${n} point${n > 1 ? 's' : ''}${named.length ? ` at ${joinList(named.map(x => x.company))}` : ''}: stronger openers, tighter wording and a measured result in each (estimates are marked ~; change them to your real numbers)` : 'Your points are already strong: action verbs, concise and measured');
+      done.push(n ? `Improved ${n} point${n > 1 ? 's' : ''}${named.length ? ` at ${joinList(named.map(x => x.company))}` : ''}: stronger openers, tighter wording and a measured result in each (marked as approximately; change them to your real numbers)` : 'Your points are already strong: action verbs, concise and measured');
       continue;
     }
     // "Organize / tidy up my CV": in each job, measured results first; skills without repeats
@@ -2098,11 +2319,28 @@ export function applyInstructions(input, text, { whole = false, job = null } = {
       done.push(moved ? `Organized your CV: in ${moved} job${moved > 1 ? 's' : ''} the measured results now come first` : 'Your CV is already organized');
       continue;
     }
+    // "Make the summary up to 10 lines", "summary should be about 5 lines", "keep the
+    // summary under 80 words", "summary in 3 sentences": a specific target length
+    if ((m = line.match(/\bsummary\b[\s\S]*?\b(?:up\s*to|about|around|roughly|approximately|max(?:imum)?(?:\s+of)?|no\s+more\s+than|at\s+most|under|within)?\s*(\d+)\s*[-–]?\s*(lines?|sentences?|words?)\b/i))) {
+      const n = parseInt(m[1], 10);
+      const unit = /line/i.test(m[2]) ? 'line' : /sentence/i.test(m[2]) ? 'sentence' : 'word';
+      const targetWords = unit === 'line' ? n * WORDS_PER_LINE : unit === 'sentence' ? n * 20 : n;
+      setSummaryLength(cv, jdTerms, targetWords, unit === 'line' ? 'line' : 'word', done);
+      continue;
+    }
     // Shorter summary / points / CV
     if (/\b(?:shorten|shorter|trim|cut down|condense|concise|tighten|reduce)\b/i.test(line) && /\bsummary\b/i.test(line)) {
       const parts = cv.summary.split(/(?<=[.!?])\s+(?=[A-Z])/);
       if (parts.length > 2) { cv.summary = parts.slice(0, 2).join(' '); done.push('Shortened your summary to its first two sentences'); }
       else done.push('Your summary is already short');
+      continue;
+    }
+    // "Each bullet point in experience should have 2 lines", "make each point ~25 words":
+    // a specific target length per bullet, not just "shorter"
+    if ((m = line.match(/\b(?:bullet\s*points?|points?|bullets?)\b[\s\S]*?\b(\d+)\s*(?:-)?\s*(lines?|words?)\b/i)) && cv.experience.length) {
+      const n = parseInt(m[1], 10);
+      const unit = /line/i.test(m[2]) ? 'line' : 'word';
+      setBulletLineLength(cv, unit === 'line' ? n * WORDS_PER_LINE : n, done);
       continue;
     }
     if (/\b(?:shorten|shorter|trim|condense|concise|tighten)\b/i.test(line) && /\b(?:points?|bullets?|lines|experience)\b/i.test(line)) {
@@ -2164,7 +2402,7 @@ export function applyInstructions(input, text, { whole = false, job = null } = {
       // a real achievement is added as written; a bare topic gets a drafted, ~marked
       // point (edit the estimate); anything else is declined rather than guessed at
       else if (looksLikePoint(m[2])) addPoint(cv, place, m[2], done);
-      else if ((drafted = draftPointFromTopic(m[2]))) addPoint(cv, place, drafted, done, '(a draft — edit the ~estimate to your real number)');
+      else if ((drafted = draftPointFromTopic(m[2]))) addPoint(cv, place, drafted, done, '(a draft — edit the approximate figure to your real number)');
       else unclear.push(`${raw} — tell me what actually happened there, e.g. "under ${m[1]} add: led the migration to Kubernetes, cutting deploy time by 30%".`);
       continue;
     }
@@ -2172,7 +2410,7 @@ export function applyInstructions(input, text, { whole = false, job = null } = {
       let drafted;
       if (!cv.experience.length) unclear.push(`${raw} — there's no work experience on this CV yet to add a point to.`);
       else if (looksLikePoint(m[1])) addPoint(cv, bestJobFor(cv, m[1]), m[1], done);
-      else if ((drafted = draftPointFromTopic(m[1]))) addPoint(cv, bestJobFor(cv, m[1]), drafted, done, '(a draft — edit the ~estimate to your real number)');
+      else if ((drafted = draftPointFromTopic(m[1]))) addPoint(cv, bestJobFor(cv, m[1]), drafted, done, '(a draft — edit the approximate figure to your real number)');
       else unclear.push(`${raw} — tell me what actually happened, e.g. "add a point: led the on-call rotation and cut incident response time by 30%".`);
       continue;
     }
@@ -2206,6 +2444,12 @@ export function applyInstructions(input, text, { whole = false, job = null } = {
       weaveSkills(cv, jdTerms, done);
       continue;
     }
+    // "Add some skills regarding/about/for testing": a topic, not specific names — pull
+    // from that category (job-posting tools first, then CV-evidenced, then standard tools)
+    if ((m = line.match(/^(?:add|put|include|insert|improve|enhance|boost|strengthen)\s+(?:a\s+few\s+|some\s+|any\s+|more\s+|additional\s+|extra\s+)*(?:more\s+|additional\s+|extra\s+)?skills?\s+(?:regarding|about|related\s+to|relevant\s+to|concerning|around|on|for|in)\s+(.+?)\.?$/i))) {
+      addTopicSkills(cv, jdTerms, m[1], done, skills);
+      continue;
+    }
     // "Add some more skills", "make improvements in the skills section", "improve my
     // skills" — no names given: only what the CV's own points and projects already
     // demonstrate is added (never invented)
@@ -2228,12 +2472,12 @@ export function applyInstructions(input, text, { whole = false, job = null } = {
       // only add it as a real achievement; never paste the request itself onto the CV —
       // a bare topic still gets a drafted, ~marked point rather than being refused outright
       if (place && looksLikePoint(tail[1])) { addPoint(cv, place, tail[1], done); continue; }
-      if (place && (drafted = draftPointFromTopic(tail[1]))) { addPoint(cv, place, drafted, done, '(a draft — edit the ~estimate to your real number)'); continue; }
+      if (place && (drafted = draftPointFromTopic(tail[1]))) { addPoint(cv, place, drafted, done, '(a draft — edit the approximate figure to your real number)'); continue; }
       const items = body.split(/\s*(?:,|;|\band\b|&)\s*/i).filter(Boolean);
       if (items.every(it => TERMS.some(t => t.name.toLowerCase() === skillName(it).toLowerCase()))) { addSkills(cv, body, done, skills); continue; }
       // a point (something done) goes under the job it fits best; an instruction is not a point
       if (cv.experience.length && looksLikePoint(body)) { addPoint(cv, bestJobFor(cv, body), body, done); continue; }
-      if (!place && cv.experience.length && (drafted = draftPointFromTopic(body))) { addPoint(cv, bestJobFor(cv, body), drafted, done, '(a draft — edit the ~estimate to your real number)'); continue; }
+      if (!place && cv.experience.length && (drafted = draftPointFromTopic(body))) { addPoint(cv, bestJobFor(cv, body), drafted, done, '(a draft — edit the approximate figure to your real number)'); continue; }
       if (place) { unclear.push(`${raw} — I can add real achievements to a job, but "${tail[1]}" doesn't read like something you actually did. Tell me what happened, e.g. "built…", "led…", "cut…".`); continue; }
     }
     // Plain sentence about a job on the CV: "At Brightloop I migrated 12 services to Kubernetes"
@@ -2285,6 +2529,15 @@ export function applyInstructions(input, text, { whole = false, job = null } = {
     // Ends in "-ed" is not enough on its own ("Added useful stuff here" starts that way
     // too) — looksLikePoint also rejects filler with nothing concrete named.
     if (cv.experience.length && !WEAK_OPENERS.test(line) && (PAST_VERBS.has(first) || (/[a-z]{3,}ed$/.test(first) && !/eed$/.test(first))) && looksLikePoint(line)) { addPoint(cv, bestJobFor(cv, line), line, done); continue; }
+    // "Make the CV more attractive/impressive/stand out", "polish my resume", "improve my
+    // CV overall" — no specific target named: a real, generic enhancement pass (the same
+    // XYZ-strengthening + cliché removal + keyword-weaving as "fix the red flags") instead
+    // of a dead end, since there's always something worth tightening.
+    if (/^(?:make|help\s+make)\s+(?:(?:the|my|this)\s+)?(?:cv|resume|profile|it|this)\s+(?:more\s+|really\s+|much\s+)?[a-z][a-z\s-]*[a-z]\.?$/i.test(line)
+      || /^(?:improve|polish|strengthen|enhance|boost|elevate|upgrade|optimi[sz]e|fix|rework|redo|refine|tune up)\s+(?:my\s+|the\s+)?(?:cv|resume|profile)(?:\s+overall)?\.?$/i.test(line)) {
+      applyReviewFixes(cv, jdTerms, done);
+      continue;
+    }
     unclear.push(`${raw} — I'm not sure what to change. Try describing exactly what you did (e.g. "led a team of 4 engineers"), or say what to add, remove or improve and where (e.g. "improve my Paywise points", "remove the point about billing").`);
   }
   // the lines themselves (without notes), for a smarter pass when Claude is set up
@@ -2561,6 +2814,16 @@ export function reviewCV(cv, { title = '', description = '' } = {}, profile, mat
     && !/\b(intern(ship)?|trainee|apprentice|contract(or)?|freelance|consultant|temporary|temp|part[- ]time|seasonal|summer)\b/i.test(`${s.x.role} ${s.x.company}`));
   if (short.length >= 2) flag(45, 'Several short stints', `${short.length} roles lasted under a year.`, 'Mark contract or project roles as such (e.g. "Contract") so they don\'t read as job hopping.');
   if (weak.length) flag(40, 'Duty-style bullets', `${weak.length} bullet${weak.length > 1 ? 's' : ''} open${weak.length > 1 ? '' : 's'} without an action verb, e.g. "${weak[0].text.split(/\s+/).slice(0, 6).join(' ')}…"`, 'Start each bullet with what you did: Built, Led, Cut, Launched…');
+  // Clichés in bullets or the summary: a reader skims past them, and they don't match
+  // any real ATS keyword, so they're dead weight whether or not they're grammatically fine
+  const clicheBullets = bullets.filter(b => hasCliche(b.text));
+  const clicheSummary = hasCliche(cv.summary);
+  if (clicheBullets.length || clicheSummary) {
+    const example = (clicheBullets[0] && clicheBullets[0].text) || cv.summary;
+    const subjects = [clicheBullets.length && `${clicheBullets.length} bullet${clicheBullets.length > 1 ? 's' : ''}`, clicheSummary && 'the summary'].filter(Boolean);
+    const verb = subjects.length > 1 || (clicheBullets.length > 1 && !clicheSummary) ? 'use' : 'uses';
+    flag(42, 'Generic phrases', `${subjects.join(' and ')} ${verb} stock phrases like "${(example.match(CLICHE_PHRASES) || [''])[0]}" instead of specifics.`, 'Replace it with what you actually did and with what tool or result — a cliché matches no ATS keyword and a recruiter skims past it.');
+  }
   // Measured on the six layouts' PDFs: about 430 words fill a page
   const pages = Math.max(1, Math.ceil(cvWordCount(cv) / 430));
   if (pages > 2) flag(38, 'Too long', `About ${pages} pages; recruiters rarely read past page two.`, 'Trim older roles to 2–3 bullets and hide sections this job doesn\'t need.');

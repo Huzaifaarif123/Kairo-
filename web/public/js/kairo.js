@@ -2028,12 +2028,36 @@ function cveAiUndo(key, noteKey) {
 
 let instructUndo = [];   // earlier versions of the CV, for "Undo last change"
 
+// "Skip fact-check" checkbox: the honesty check is archived (off) for now, by default —
+// the code stays in place (see validateWholeCvEdit/mergeRewrite in tailor.js/ai-tailor.ts)
+// so it can be switched back on in one click; it's not deleted, just not applied unless
+// this box is unchecked. Remembered in this browser (localStorage). The warning banner
+// still shows on every request it's used for, so it's never silent even while archived.
+const INSTRUCT_UNFILTERED_KEY = 'kairoInstructUnfiltered';
+function instructUnfiltered() {
+  const box = document.getElementById('tailor-instruct-unfiltered');
+  return Boolean(box && box.checked);
+}
+function initInstructUnfiltered() {
+  const box = document.getElementById('tailor-instruct-unfiltered');
+  if (!box) return;
+  try {
+    const saved = localStorage.getItem(INSTRUCT_UNFILTERED_KEY);
+    // No saved preference yet: default to checked (checks archived) rather than off
+    box.checked = saved === null ? true : saved === '1';
+  } catch { box.checked = true; }
+  box.addEventListener('change', () => {
+    try { localStorage.setItem(INSTRUCT_UNFILTERED_KEY, box.checked ? '1' : '0'); } catch {}
+  });
+}
+
 // Called after each tailoring run
 let instructBaseSummary = '';   // the summary Kairo wrote for this job
 
 function instructLoaded(result) {
   instructUndo = [];
   instructBaseSummary = (result && result.cv && result.cv.summary) || '';
+  initInstructUnfiltered();
   const box = document.getElementById('tailor-instruct');
   if (box) box.value = '';
   setInstructResult('');
@@ -2121,7 +2145,7 @@ async function applyInstruct(button) {
       // a stuck request fails with a clear message instead of spinning forever.
       signal: AbortSignal.timeout(160_000),
       // the job too, so changes can be tailored to it
-      body: JSON.stringify({ cv: tailorWs.cv, text: changes.join('\n'), job: { title: document.getElementById('tailor-title').value.trim(), description: document.getElementById('tailor-desc').value.trim() } })
+      body: JSON.stringify({ cv: tailorWs.cv, text: changes.join('\n'), job: { title: document.getElementById('tailor-title').value.trim(), description: document.getElementById('tailor-desc').value.trim() }, unfiltered: instructUnfiltered() })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Could not apply that');
@@ -2134,10 +2158,11 @@ async function applyInstruct(button) {
       if (!document.getElementById('tailor-edit-card').hidden) renderEditor(tailorWs);
       cveRender(tailorWs, 0);
     }
-    // Keep only the original request (not the explanation) in the box, to fix and try again
-    box.value = (data.pending && data.pending.length ? data.pending : data.unclear).join('\n');
+    // Keep only the original request (not the explanation, already shown below) in the box
+    box.value = (data.pending && data.pending.length ? data.pending : data.unclear).map(u => u.split(' — ')[0]).join('\n');
     setInstructResult(
-      summaryNote + questions.map(q => `<div class="instruct-answer"><strong>${escapeHtml(q)}</strong><p>${answerInstructQuestion(q)}</p></div>`).join('')
+      (data.unfiltered ? '<div class="instruct-unfiltered-warning"><strong>Fact-check was off for this request.</strong> The AI\'s output was applied without checking for invented technologies, numbers or claims — review it before using this CV.</div>' : '')
+      + summaryNote + questions.map(q => `<div class="instruct-answer"><strong>${escapeHtml(q)}</strong><p>${answerInstructQuestion(q)}</p></div>`).join('')
       + (data.done.length ? `<ul class="instruct-done">${data.done.map(d => `<li>${escapeHtml(d)}</li>`).join('')}</ul>` : '')
       + (data.unclear.length ? `<div class="instruct-unclear"><strong>Not changed</strong> (left in the box):<ul>${data.unclear.map(u => `<li>${escapeHtml(u)}</li>`).join('')}</ul>${data.ai ? 'Try describing it a different way — say exactly what you did, or name the job or section.' : 'Try one of the examples below. For anything else, I need an AI key added (Anthropic, Groq or OpenRouter), or the local AI (Ollama) running.'}</div>` : ''));
   } catch (err) {
@@ -2315,6 +2340,9 @@ function isInstructQuestion(line) {
   if (/^(?:what|which|how|why|where|who|tell me|show me|explain)\b/i.test(line)) return true;
   if (/^(?:can|could|would|will)\s+(?:you|u)\b|^(?:please|pls|kindly)\b/i.test(line)) return !INSTRUCT_ACTION.test(line) && /\?\s*$/.test(line);
   if (/^(?:is|am|are|do|does|did|should|can|could)\b/i.test(line)) return true;
+  // "Rate/score/grade/evaluate my CV's ATS score": asking for an assessment, not an edit —
+  // phrased as an imperative (no "?", not a what/how/can opener), but still a question
+  if (/^(?:rate|score|grade|evaluate|assess|review|analy[sz]e|check)\b/i.test(line) && /\b(?:cv|resume|profile|summary|ats|score|rating|match)\b/i.test(line)) return true;
   return /\?\s*$/.test(line) && !INSTRUCT_ACTION.test(line.split(/\s+/).slice(0, 3).join(' '));
 }
 

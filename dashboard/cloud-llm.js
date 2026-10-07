@@ -39,8 +39,11 @@ The CV's fields are: name, headline, summary, email, phone, location, linkedin, 
 - If you change even one bullet in a job, or one item in a skills group, return that whole list (all jobs in "experience", all groups in "skills") — but only if something in it changed.
 - Make every requested change, and nothing else.
 - A request to rewrite something that already exists ("update/improve/polish/strengthen the summary", "make my headline sound senior", "tighten my Brightloop bullets") should be done: reword it using only facts already on the CV, without inventing anything new. Only decline (put it in "notDone") when the request would need NEW information nobody gave you — e.g. "add something useful", "add a point about X" with no real detail. Never copy a request's own wording onto the CV as if it were real content.
+- Read the whole CV first — the role, industry, seniority, tech stack and existing bullet style — and use that context to draft real, specific wording yourself. When asked to add or expand something, write the actual content; never reply with only a request for more detail as if that were the answer.
+- Follow ATS practice: mirror the job posting's exact keyword phrasing wherever the candidate's real experience actually supports it, use standard section labels, no special characters or symbols, spell out an acronym the first time it's used.
+- Never use stock resume phrases — "team player", "results-driven", "detail-oriented", "hardworking", "self-starter", "proven track record", "excellent communication skills", "passionate about", "highly motivated" and the like. Every line names a concrete tool, method or deliverable instead; content with a stock phrase is rejected automatically regardless of what else is right about it.
 - Never add an employer, job title, degree, school or certification the owner didn't name in their request.
-- Never add a number (a year, a percent, a count of anything) that isn't already on the CV or in the request. If asked for achievements or results with no number given, you may add one realistic, modest estimate, but you must write it with "~" right before it (e.g. "~30%", "~500 users").
+- Never add a number (a year, a percent, a count of anything) that isn't already on the CV or in the request. If asked for achievements or results with no number given, you may add one realistic, modest estimate, but you must write it with "approximately" right before it (e.g. "approximately 30%", "approximately 500 users"), never as a bare, exact-looking figure.
 - Points start with a strong past-tense verb and stay under 30 words. No first person ("I", "we").
 - "notDone" must only contain requests that were actually asked — never comment on a field nobody asked about.`;
 
@@ -129,8 +132,11 @@ export async function answerQuestions(cv, job, questions) {
  * actually reached the provider and got a usable reply (true), or failed outright
  * (false, e.g. a rate limit), so the caller can decide whether another backend
  * (the local model) is worth trying instead of treating "we tried" as "it worked".
+ * @param {boolean} [unfiltered] skips the honesty check when true — an explicit,
+ * user-visible opt-in for an unverified draft, never the default (the model can
+ * otherwise fabricate facts: invented technologies, numbers, even employers).
  */
-export async function applyWithCloudModel(result) {
+export async function applyWithCloudModel(result, unfiltered = false) {
   if (!result.pending.length) return true;
   const requestText = result.pending.join('\n');
   const originalMessage = result.unclear.find(u => u.startsWith(requestText));
@@ -155,7 +161,7 @@ export async function applyWithCloudModel(result) {
   if (touchedCv) out.cv = { ...result.cv, ...out.cv };
   if (!touchedCv) {
     result.pending = notDone.length ? notDone : [fallback('nothing to change.')];
-  } else if (validateWholeCvEdit(result.cv, out.cv, requestText)) {
+  } else if (unfiltered || validateWholeCvEdit(result.cv, out.cv, requestText)) {
     const normalized = normalizeCV(out.cv);
     if (JSON.stringify(normalized) === JSON.stringify(normalizeCV(result.cv))) {
       result.pending = [fallback("I couldn't make that change.")];

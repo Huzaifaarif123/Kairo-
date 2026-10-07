@@ -55,8 +55,11 @@ const EDIT_PROMPT = `You edit a CV exactly as its owner asks. You receive the CV
 - If you change even one bullet in a job, or one item in a skills group, return that whole list (all jobs in "experience", all groups in "skills") — but only if something in it changed. Fields you didn't touch at all should not appear in "cv".
 - Make every requested change, and nothing else.
 - A request to rewrite something that already exists ("update/improve/polish/strengthen the summary", "make my headline sound senior", "tighten my Brightloop bullets") should be done: reword it using only facts already on the CV, without inventing anything new. Only decline (put it in "notDone") when the request would need NEW information nobody gave you — e.g. "add something useful", "add a point about X" with no real detail. Never copy a request's own wording onto the CV as if it were real content.
+- Read the whole CV first — the role, industry, seniority, tech stack and existing bullet style — and use that context to draft real, specific wording yourself. When asked to add or expand something, write the actual content; never reply with only a request for more detail as if that were the answer.
+- Follow ATS practice: mirror the job posting's exact keyword phrasing wherever the candidate's real experience actually supports it, use standard section labels, no special characters or symbols, spell out an acronym the first time it's used.
+- Never use stock resume phrases — "team player", "results-driven", "detail-oriented", "hardworking", "self-starter", "proven track record", "excellent communication skills", "passionate about", "highly motivated" and the like. Every line names a concrete tool, method or deliverable instead; content with a stock phrase is rejected automatically regardless of what else is right about it.
 - Never add an employer, job title, degree, school or certification the owner didn't name in their request.
-- Never add a number (a year, a percent, a count of anything) that isn't already on the CV or in the request. If asked for achievements or results with no number given, you may add one realistic, modest estimate, but you must write it with "~" right before it (e.g. "~30%", "~500 users").
+- Never add a number (a year, a percent, a count of anything) that isn't already on the CV or in the request. If asked for achievements or results with no number given, you may add one realistic, modest estimate, but you must write it with "approximately" right before it (e.g. "approximately 30%", "approximately 500 users"), never as a bare, exact-looking figure.
 - Points start with a strong past-tense verb and stay under 30 words. No first person ("I", "we").
 - List what you changed in "changes", and any request you could not do in "notDone" (the request, then " — ", then a short, plain reason). "notDone" must only contain requests that were actually in <requests> — never comment on a field nobody asked about.`;
 
@@ -91,8 +94,10 @@ async function askModel(cv, requests) {
  * The local model's pass over requests the rules didn't understand. One call, the whole
  * CV: the model returns the whole updated CV, checked by validateWholeCvEdit before it's
  * allowed to replace `result.cv`. Changes `result` in place and returns it.
+ * @param {boolean} [unfiltered] skips the honesty check when true — an explicit,
+ * user-visible opt-in for an unverified draft, never the default.
  */
-export async function applyWithLocalModel(result) {
+export async function applyWithLocalModel(result, unfiltered = false) {
   if (!result.pending.length) return result;
   const requestText = result.pending.join('\n');
   // The rule engine's own message for this request (if it had something specific to say,
@@ -118,7 +123,7 @@ export async function applyWithLocalModel(result) {
   if (touchedCv) out.cv = { ...result.cv, ...out.cv };
   if (!touchedCv) {
     result.pending = notDone.length ? notDone : [fallback('nothing to change.')];
-  } else if (validateWholeCvEdit(result.cv, out.cv, requestText)) {
+  } else if (unfiltered || validateWholeCvEdit(result.cv, out.cv, requestText)) {
     const normalized = normalizeCV(out.cv);
     // a small model can say "changes" that its own JSON doesn't actually contain — trust
     // the diff, not the model's description of itself. If nothing really changed, treat
