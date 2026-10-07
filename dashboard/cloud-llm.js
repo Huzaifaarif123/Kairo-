@@ -1,12 +1,25 @@
 // "Tell it what to add or change": requests the rules don't understand go to a free-tier
-// cloud model (Groq or OpenRouter — whichever has a key set) when one is configured, as a
-// faster and more reliable alternative to Anthropic or the local Ollama model. Same idea
-// as local-llm.js: the model sees the whole CV and returns the whole updated CV in the
-// same shape, checked by the shared validateWholeCvEdit honesty gate before it's trusted.
+// cloud model when one is configured, as a faster and more reliable alternative to
+// Anthropic or the local Ollama model. Same idea as local-llm.js: the model sees the
+// whole CV and returns the whole updated CV in the same shape, checked by the shared
+// validateWholeCvEdit honesty gate before it's trusted.
+//
+// Gemini is tried first when configured (a notably more generous free-tier rate limit
+// than Groq's — see the comment on GEMINI_MODEL), then Groq/OpenRouter as the next tier,
+// mirroring the Claude -> cloud -> local-Ollama fallback one level up in the route.
 import { normalizeCV, validateWholeCvEdit } from './tailor.js';
 
-// Either key activates this path; Groq is tried first if both are set. Both APIs are
-// OpenAI-compatible, so the same request shape works for either one.
+const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
+// gemini-3.5-flash-lite: verified live (2026-10-07) as the first model in this key's
+// catalog that actually serves generateContent quickly — several of Gemini's current
+// model names (gemini-3.8-flash, gemini-flash-latest, the plain -flash/-pro aliases)
+// either 404 as retired or hang for 15-30s before timing out on this account, despite
+// being listed by the API; this one responds in ~1-1.5s. Override via GEMINI_MODEL if a
+// different key/account needs a different name.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+
+// Either key activates the Groq/OpenRouter tier; Groq is tried first if both are set.
+// Both APIs are OpenAI-compatible, so the same request shape works for either one.
 const GROQ_KEY = process.env.GROQ_API_KEY || '';
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || '';
 const PROVIDER = GROQ_KEY
@@ -15,8 +28,8 @@ const PROVIDER = GROQ_KEY
     ? { key: OPENROUTER_KEY, url: 'https://openrouter.ai/api/v1/chat/completions', model: process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free' }
     : null;
 
-/** Whether a cloud model (Groq or OpenRouter) is configured. */
-export const cloudAiConfigured = Boolean(PROVIDER);
+/** Whether any cloud model (Gemini, Groq or OpenRouter) is configured. */
+export const cloudAiConfigured = Boolean(GEMINI_KEY || PROVIDER);
 
 const EDIT_PROMPT = `You edit a CV exactly as its owner asks. You receive the CV as JSON and their requests.
 Reply with ONLY a JSON object, no other text, shaped exactly like this:
@@ -31,8 +44,27 @@ The CV's fields are: name, headline, summary, email, phone, location, linkedin, 
 - Points start with a strong past-tense verb and stay under 30 words. No first person ("I", "we").
 - "notDone" must only contain requests that were actually asked — never comment on a field nobody asked about.`;
 
-/** A single JSON-mode chat call to whichever cloud provider is configured. */
-export async function chatJSON(systemPrompt, userContent, timeoutMs = 60_000, maxTokens = 8000) {
+async function chatJSONGemini(systemPrompt, userContent, timeoutMs, maxTokens) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_KEY}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ parts: [{ text: userContent }] }],
+      generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: maxTokens }
+    })
+  });
+  if (!res.ok) throw new Error(`Gemini error: ${res.status} ${await res.text().catch(() => '')}`);
+  const data = await res.json();
+  const candidate = data.candidates && data.candidates[0];
+  if (candidate && candidate.finishReason === 'MAX_TOKENS') throw new Error('Gemini reply was cut off (too long for the token budget)');
+  const part = candidate && candidate.content && candidate.content.parts && candidate.content.parts.find(p => p.text);
+  return JSON.parse((part && part.text) || '{}');
+}
+
+async function chatJSONOpenAICompatible(systemPrompt, userContent, timeoutMs, maxTokens) {
   const res = await fetch(PROVIDER.url, {
     method: 'POST',
     signal: AbortSignal.timeout(timeoutMs),
@@ -57,6 +89,25 @@ export async function chatJSON(systemPrompt, userContent, timeoutMs = 60_000, ma
   if (choice && choice.finish_reason === 'length') throw new Error(`${PROVIDER.url.includes('groq') ? 'Groq' : 'OpenRouter'} reply was cut off (too long for the token budget)`);
   const content = choice && choice.message && choice.message.content;
   return JSON.parse(content || '{}');
+}
+
+/**
+ * A single JSON-mode chat call to whichever cloud provider is configured. Gemini is
+ * tried first when it has a key; if that call fails and a Groq/OpenRouter key is also
+ * set, that's tried next before giving up — the same "don't let one backend's outage
+ * take down the whole fallback tier" principle as the cloud -> local-Ollama handoff one
+ * level up.
+ */
+export async function chatJSON(systemPrompt, userContent, timeoutMs = 60_000, maxTokens = 8000) {
+  if (GEMINI_KEY) {
+    try {
+      return await chatJSONGemini(systemPrompt, userContent, timeoutMs, maxTokens);
+    } catch (err) {
+      console.error('Gemini failed:', err.message);
+      if (!PROVIDER) throw err;
+    }
+  }
+  return chatJSONOpenAICompatible(systemPrompt, userContent, timeoutMs, maxTokens);
 }
 
 async function askCloud(cv, requests) {
