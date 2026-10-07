@@ -63,6 +63,15 @@ async function askCloud(cv, requests) {
   return chatJSON(EDIT_PROMPT, `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n<requests>\n${requests.join('\n')}\n</requests>`);
 }
 
+const ASK_PROMPT = `You answer questions about a CV, honestly and specifically, using only what's in the CV JSON you're given (and the job posting, if one is given). Reply with ONLY a JSON object: {"answers": {"<question, exactly as asked>": "<a short, specific, plain-English answer, 1-3 sentences>"}}. One entry per question. Never invent facts not in the CV; if something truly can't be answered from the CV, say so plainly in the answer rather than guessing.`;
+
+/** A short, specific answer for each question, grounded only in the CV (and job, if given). */
+export async function answerQuestions(cv, job, questions) {
+  const user = `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n${job && (job.title || job.description) ? `<job_posting>\nTitle: ${job.title || ''}\n${job.description || ''}\n</job_posting>\n\n` : ''}<questions>\n${questions.join('\n')}\n</questions>`;
+  const out = await chatJSON(ASK_PROMPT, user, 30_000, 2000);
+  return out && typeof out.answers === 'object' && out.answers ? out.answers : {};
+}
+
 /**
  * The cloud model's pass over requests the rules didn't understand. Same contract as
  * applyWithLocalModel: changes `result` in place and returns it, never throws.

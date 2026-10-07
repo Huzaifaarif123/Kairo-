@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { tailorCV, saveTailoredCV, renderTailoredCV, profileToCV, applyInstructions, scopeCV, scopeText, mergeScoped } from './tailor.js';
 import { applyWithLocalModel, localModelReady } from './local-llm.js';
-import { cloudAiConfigured, applyWithCloudModel } from './cloud-llm.js';
+import { cloudAiConfigured, applyWithCloudModel, answerQuestions } from './cloud-llm.js';
 import { compileLatexWithRetry, LatexCompileError } from './latex-compile.js';
 import { resolveProfile, listProfiles, profileDetails, usesOriginalOwner, readProfileMarkdown, writeProfileMarkdown, evaluateAgainstProfile } from './profiles.js';
 
@@ -240,6 +240,32 @@ const server = http.createServer(async (req, res) => {
     const ok = cv.name || cv.experience.length;
     res.writeHead(ok ? 200 : 422, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(ok ? renderTailoredCV(cv, {}, '') : { error: `The ${profile.label} profile is still empty. Fill it in first, or start from a blank CV.` }));
+    return;
+  }
+
+  // A question the review's fixed categories can't answer specifically: a real,
+  // CV-grounded answer from the cloud model (if configured). Read-only; never edits the CV.
+  if (pathname === '/api/cv/ask' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; if (body.length > 300000) req.destroy(); });
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body || '{}');
+        if (!data.cv || typeof data.cv !== 'object') throw Object.assign(new Error('Tailor a CV first.'), { status: 400 });
+        const questions = Array.isArray(data.questions) ? data.questions.map(String).filter(q => q.trim()).slice(0, 10) : [];
+        let answers = {};
+        if (questions.length && cloudAiConfigured) {
+          const job = data.job && typeof data.job === 'object' ? data.job : null;
+          answers = await answerQuestions(data.cv, job, questions);
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ answers }));
+      } catch (err) {
+        console.error('Question answering failed:', err);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ answers: {} }));
+      }
+    });
     return;
   }
 

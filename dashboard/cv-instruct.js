@@ -68,7 +68,22 @@ async function applyInstruct(button) {
   const changes = lines.filter(l => !isInstructQuestion(l));
   if (questions.length && !changes.length) {
     box.value = '';
-    setInstructResult(summaryNote + questions.map(q => `<div class="instruct-answer"><strong>${escapeHtml(q)}</strong><p>${answerInstructQuestion(q)}</p></div>`).join(''));
+    setInstructResult(summaryNote + questions.map(q => `<div class="instruct-answer" data-q="${escapeHtml(q)}"><strong>${escapeHtml(q)}</strong><p>${answerInstructQuestion(q)}</p></div>`).join(''));
+    // A question outside the review's fixed categories gets a real, CV-grounded answer
+    // from AI in the background (if one is configured), replacing the generic recap
+    const openEnded = questions.filter(q => !questionHasSpecificCategory(q));
+    if (openEnded.length && tailorWs.cv) {
+      fetch(apiUrl('/api/cv/ask'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cv: tailorWs.cv, questions: openEnded, job: { title: document.getElementById('tailor-title').value.trim(), description: document.getElementById('tailor-desc').value.trim() } })
+      }).then(res => res.json()).then(data => {
+        for (const [q, answer] of Object.entries(data.answers || {})) {
+          const p = document.querySelector(`.instruct-answer[data-q="${CSS.escape(q)}"] p`);
+          if (p && answer) p.textContent = answer;
+        }
+      }).catch(() => {});
+    }
     return;
   }
   button.disabled = true;
@@ -272,6 +287,17 @@ function isInstructQuestion(line) {
   if (/^(?:can|could|would|will)\s+(?:you|u)\b|^(?:please|pls|kindly)\b/i.test(line)) return !INSTRUCT_ACTION.test(line) && /\?\s*$/.test(line);
   if (/^(?:is|am|are|do|does|did|should|can|could)\b/i.test(line)) return true;
   return /\?\s*$/.test(line) && !INSTRUCT_ACTION.test(line.split(/\s+/).slice(0, 3).join(' '));
+}
+
+// Whether answerInstructQuestion has a specific category for this question, rather than
+// its generic recap — when it doesn't, the question is also sent to AI (if configured)
+// for a real answer, since the generic recap isn't actually answering what was asked
+function questionHasSpecificCategory(q) {
+  return /\b(score|match|rating|percent|%|how good|how strong|good enough|ready|chance|fit)\b/i.test(q)
+    || /\b(missing|gap|lack|need|require|skills?|keywords?)\b/i.test(q)
+    || /\b(red flags?|problems?|issues?|wrong|weak|bad)\b/i.test(q)
+    || /\b(long|length|pages?|short)\b/i.test(q)
+    || /\b(improve|better|stronger|tips?|suggest|advice|change|fix)\b/i.test(q);
 }
 
 // An answer from this CV's review: score, gaps, red flags, what to improve, length

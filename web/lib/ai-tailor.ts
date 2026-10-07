@@ -337,3 +337,28 @@ export async function editCvWithClaude(cv: EditableCv & Record<string, unknown>,
   if (!validateWholeCvEdit(cv, out.cv, requests.join('\n'))) return null;
   return { cv: { ...cv, ...out.cv, projects: out.cv.projects.map(p => ({ ...p, desc: p.bullets.join(' ') })) }, changes: out.changes, notDone: out.notDone };
 }
+
+// ---------- "Tell it what to add or change": questions the rules can't answer specifically ----------
+
+const AnswerSchema = z.object({
+  answers: z.record(z.string(), z.string())
+});
+
+const ASK_PROMPT = `You answer questions about a CV, honestly and specifically, using only what's in the CV JSON you're given (and the job posting, if one is given). Reply with one entry per question in "answers": a short, specific, plain-English answer (1-3 sentences) keyed by the question exactly as asked. Never invent facts not in the CV; if something truly can't be answered from the CV, say so plainly in the answer rather than guessing.`;
+
+/** A short, specific answer for each question, grounded only in the CV (and job, if given). */
+export async function answerQuestionsWithClaude(cv: Record<string, unknown>, job: { title?: string; description?: string } | null, questions: string[]) {
+  const user = `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n${job && (job.title || job.description) ? `<job_posting>\nTitle: ${job.title || ''}\n${job.description || ''}\n</job_posting>\n\n` : ''}<questions>\n${questions.join('\n')}\n</questions>`;
+  const response = await getClient().beta.messages.parse({
+    model: AI_MODEL,
+    max_tokens: 2000,
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default',
+    output_config: { effort: 'low', format: betaZodOutputFormat(AnswerSchema) },
+    system: ASK_PROMPT,
+    messages: [{ role: 'user', content: user }]
+  });
+  const out = response.parsed_output;
+  if (!out || response.stop_reason === 'refusal') return {};
+  return out.answers;
+}
