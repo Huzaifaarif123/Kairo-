@@ -183,6 +183,7 @@ async function runTailor({ ai = true } = {}) {
     const res = await fetch(apiUrl('/api/tailor'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(65_000),
       body: JSON.stringify({ title, company, description, confirmedSkills: [...tailorConfirmed], ai, template: tailorLayout, styles: tailorWs.styles, profileMarkdown: tailorOneOffMarkdown() || undefined })
     });
     const data = await res.json();
@@ -190,7 +191,8 @@ async function runTailor({ ai = true } = {}) {
     tailorResult = data;
     renderTailorResult();
   } catch (err) {
-    showToast(err.message || 'Could not reach the server');
+    const timedOut = err.name === 'TimeoutError' || err.name === 'AbortError';
+    showToast(timedOut ? 'Tailoring took too long and was cancelled — try again.' : (err.message || 'Could not reach the server'));
   } finally {
     button.disabled = false;
     button.textContent = 'Tailor my CV';
@@ -380,6 +382,7 @@ async function saveTailoredToProject() {
     const res = await fetch(apiUrl('/api/tailor'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(15_000),
       // The exact CV on screen (latex + filename); title/description for the local dashboard server
       body: JSON.stringify({ title, company, description: document.getElementById('tailor-desc').value, confirmedSkills: [...tailorConfirmed], save: true, latex: currentLayout().latex, filename: tailorResult.filename })
     });

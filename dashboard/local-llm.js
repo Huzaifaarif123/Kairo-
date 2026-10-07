@@ -63,8 +63,13 @@ const EDIT_PROMPT = `You edit a CV exactly as its owner asks. You receive the CV
 async function askModel(cv, requests) {
   const res = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: 'POST',
-    // the first request loads the model into memory, which can take a while
-    signal: AbortSignal.timeout(240_000),
+    // Capped well under the old 240s: on a RAM-constrained machine a slow local
+    // model doesn't get faster by waiting longer, it just leaves the person
+    // staring at "Working on it…" for up to 4 minutes before failing anyway.
+    // 90s is enough for the first call's model-load; a stuck request now fails
+    // fast enough that the caller can still try a different backend within the
+    // route's overall time budget.
+    signal: AbortSignal.timeout(90_000),
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model,

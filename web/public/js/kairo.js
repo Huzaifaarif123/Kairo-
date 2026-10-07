@@ -1175,6 +1175,7 @@ async function runTailor({ ai = true } = {}) {
     const res = await fetch(apiUrl('/api/tailor'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(65_000),
       body: JSON.stringify({ title, company, description, confirmedSkills: [...tailorConfirmed], ai, template: tailorLayout, styles: tailorWs.styles, profileMarkdown: tailorOneOffMarkdown() || undefined })
     });
     const data = await res.json();
@@ -1182,7 +1183,8 @@ async function runTailor({ ai = true } = {}) {
     tailorResult = data;
     renderTailorResult();
   } catch (err) {
-    showToast(err.message || 'Could not reach the server');
+    const timedOut = err.name === 'TimeoutError' || err.name === 'AbortError';
+    showToast(timedOut ? 'Tailoring took too long and was cancelled — try again.' : (err.message || 'Could not reach the server'));
   } finally {
     button.disabled = false;
     button.textContent = 'Tailor my CV';
@@ -1372,6 +1374,7 @@ async function saveTailoredToProject() {
     const res = await fetch(apiUrl('/api/tailor'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(15_000),
       // The exact CV on screen (latex + filename); title/description for the local dashboard server
       body: JSON.stringify({ title, company, description: document.getElementById('tailor-desc').value, confirmedSkills: [...tailorConfirmed], save: true, latex: currentLayout().latex, filename: tailorResult.filename })
     });
@@ -1982,6 +1985,7 @@ async function cveAiApply(key, section, i, btn) {
     const res = await fetch(apiUrl('/api/cv/instruct'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(160_000),
       body: JSON.stringify({ cv: ws.cv, text, scope: { section, index: i }, job: ws.job() })
     });
     const data = await res.json();
@@ -2000,7 +2004,8 @@ async function cveAiApply(key, section, i, btn) {
       + (data.unclear.length ? `<div class="instruct-unclear"><strong>Not changed:</strong><ul>${data.unclear.map(u => `<li>${escapeHtml(u)}</li>`).join('')}</ul>${data.ai ? 'Try describing it a different way.' : 'Try one of the examples above.'}</div>` : ''));
   } catch (err) {
     ws.aiDrafts[noteKey] = text;
-    done(`<div class="instruct-unclear">${escapeHtml(err.message || 'Could not reach the server')}</div>`);
+    const timedOut = err.name === 'TimeoutError' || err.name === 'AbortError';
+    done(`<div class="instruct-unclear">${escapeHtml(timedOut ? 'That took too long and was cancelled — try again, or describe it more simply.' : (err.message || 'Could not reach the server'))}</div>`);
   }
 }
 
@@ -2093,6 +2098,7 @@ async function applyInstruct(button) {
       fetch(apiUrl('/api/cv/ask'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(35_000),
         body: JSON.stringify({ cv: tailorWs.cv, questions: openEnded, job: { title: document.getElementById('tailor-title').value.trim(), description: document.getElementById('tailor-desc').value.trim() } })
       }).then(res => res.json()).then(data => {
         for (const [q, answer] of Object.entries(data.answers || {})) {
@@ -2110,6 +2116,10 @@ async function applyInstruct(button) {
     const res = await fetch(apiUrl('/api/cv/instruct'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      // Generous, but bounded: the server's own worst case (a cloud AI call that
+      // fails, falling through to the local model) is capped well under this, so
+      // a stuck request fails with a clear message instead of spinning forever.
+      signal: AbortSignal.timeout(160_000),
       // the job too, so changes can be tailored to it
       body: JSON.stringify({ cv: tailorWs.cv, text: changes.join('\n'), job: { title: document.getElementById('tailor-title').value.trim(), description: document.getElementById('tailor-desc').value.trim() } })
     });
@@ -2131,7 +2141,9 @@ async function applyInstruct(button) {
       + (data.done.length ? `<ul class="instruct-done">${data.done.map(d => `<li>${escapeHtml(d)}</li>`).join('')}</ul>` : '')
       + (data.unclear.length ? `<div class="instruct-unclear"><strong>Not changed</strong> (left in the box):<ul>${data.unclear.map(u => `<li>${escapeHtml(u)}</li>`).join('')}</ul>${data.ai ? 'Try describing it a different way — say exactly what you did, or name the job or section.' : 'Try one of the examples below. For anything else, I need an AI key added (Anthropic, Groq or OpenRouter), or the local AI (Ollama) running.'}</div>` : ''));
   } catch (err) {
-    showToast(err.message || 'Could not reach the server');
+    const timedOut = err.name === 'TimeoutError' || err.name === 'AbortError';
+    showToast(timedOut ? 'That took too long and was cancelled — try again, or describe it more simply.' : (err.message || 'Could not reach the server'));
+    setInstructResult('');
   } finally {
     button.disabled = false;
     button.textContent = 'Apply to CV';

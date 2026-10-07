@@ -284,8 +284,13 @@ const server = http.createServer(async (req, res) => {
         const sc = data.scope && typeof data.scope === 'object' && ['personal', 'summary', 'skills', 'experience', 'projects', 'education', 'certifications'].includes(String(data.scope.section))
           ? { section: String(data.scope.section), index: Math.max(0, Math.floor(Number(data.scope.index) || 0)) } : null;
         const result = applyInstructions(sc ? scopeCV(data.cv, sc) : data.cv, sc ? scopeText(text, sc, data.cv) : text, { job: { title: String(job.title || '').slice(0, 200), description: String(job.description || '').slice(0, 30000) } });
-        const cloud = result.pending.length > 0 && cloudAiConfigured;
-        if (cloud) await applyWithCloudModel(result);
+        let cloud = false;
+        if (result.pending.length > 0 && cloudAiConfigured) {
+          const pendingBefore = [...result.pending];
+          const unclearBefore = [...result.unclear];
+          cloud = await applyWithCloudModel(result);
+          if (!cloud) { result.pending = pendingBefore; result.unclear = unclearBefore; }
+        }
         const local = !cloud && result.pending.length > 0 && await localModelReady();
         if (local) await applyWithLocalModel(result);
         if (sc) result.cv = mergeScoped(data.cv, result.cv, sc);

@@ -73,11 +73,14 @@ export async function answerQuestions(cv, job, questions) {
 }
 
 /**
- * The cloud model's pass over requests the rules didn't understand. Same contract as
- * applyWithLocalModel: changes `result` in place and returns it, never throws.
+ * The cloud model's pass over requests the rules didn't understand. Changes `result`
+ * in place like applyWithLocalModel, but — unlike it — returns whether the call
+ * actually reached the provider and got a usable reply (true), or failed outright
+ * (false, e.g. a rate limit), so the caller can decide whether another backend
+ * (the local model) is worth trying instead of treating "we tried" as "it worked".
  */
 export async function applyWithCloudModel(result) {
-  if (!result.pending.length) return result;
+  if (!result.pending.length) return true;
   const requestText = result.pending.join('\n');
   const originalMessage = result.unclear.find(u => u.startsWith(requestText));
   const fallback = (reason) => originalMessage || `${requestText} — ${reason}`;
@@ -93,7 +96,7 @@ export async function applyWithCloudModel(result) {
       result.pending = [`${requestText} — the AI is at its free-tier rate limit right now; wait a few seconds and try again.`];
       result.unclear = result.pending;
     }
-    return result;
+    return false;
   }
   const notDone = (Array.isArray(out && out.notDone) ? out.notDone.map(String) : [])
     .filter(n => result.pending.some(p => n.startsWith(p) || p.toLowerCase().includes(n.split(' — ')[0].toLowerCase().slice(0, 20))));
@@ -118,5 +121,9 @@ export async function applyWithCloudModel(result) {
     result.pending = [fallback('that change couldn\'t be made safely (it would have added something not in your request), try rephrasing it.')];
   }
   result.unclear = result.pending;
-  return result;
+  // The call itself succeeded (a reply came back and was handled) even when the
+  // model declined the request or the honesty check rejected its answer — that's
+  // a legitimate outcome, not a backend failure, so it does not fall through to
+  // the local model too.
+  return true;
 }

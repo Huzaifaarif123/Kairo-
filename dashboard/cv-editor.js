@@ -589,6 +589,7 @@ async function cveAiApply(key, section, i, btn) {
     const res = await fetch(apiUrl('/api/cv/instruct'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(160_000),
       body: JSON.stringify({ cv: ws.cv, text, scope: { section, index: i }, job: ws.job() })
     });
     const data = await res.json();
@@ -607,7 +608,8 @@ async function cveAiApply(key, section, i, btn) {
       + (data.unclear.length ? `<div class="instruct-unclear"><strong>Not changed:</strong><ul>${data.unclear.map(u => `<li>${escapeHtml(u)}</li>`).join('')}</ul>${data.ai ? 'Try describing it a different way.' : 'Try one of the examples above.'}</div>` : ''));
   } catch (err) {
     ws.aiDrafts[noteKey] = text;
-    done(`<div class="instruct-unclear">${escapeHtml(err.message || 'Could not reach the server')}</div>`);
+    const timedOut = err.name === 'TimeoutError' || err.name === 'AbortError';
+    done(`<div class="instruct-unclear">${escapeHtml(timedOut ? 'That took too long and was cancelled — try again, or describe it more simply.' : (err.message || 'Could not reach the server'))}</div>`);
   }
 }
 

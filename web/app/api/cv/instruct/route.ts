@@ -52,10 +52,15 @@ export async function POST(req: Request) {
   // No Claude: a free-tier cloud model (Groq/OpenRouter), when one is configured
   let cloud = false;
   if (!aiConfigured && cloudAiConfigured && result.pending.length) {
-    cloud = true;
-    await applyWithCloudModel(result);
+    // Saved so a failed cloud call (e.g. rate-limited) can hand the local model a
+    // clean, original request instead of its own "rate limit" message to chew on.
+    const pendingBefore = [...result.pending];
+    const unclearBefore = [...result.unclear];
+    cloud = await applyWithCloudModel(result);
+    if (!cloud) { result.pending = pendingBefore; result.unclear = unclearBefore; }
   }
-  // No Claude or cloud model: the local model (Ollama on this computer), when it's running
+  // Cloud wasn't configured, or it was tried and genuinely failed (not just
+  // declined the request): the local model (Ollama on this computer), if running
   let local = false;
   if (!aiConfigured && !cloud && result.pending.length && await localModelReady()) {
     local = true;
