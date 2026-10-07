@@ -2,16 +2,17 @@
 
 ## Installed portal CLIs (primary for `/scrape`)
 
-`/scrape` discovers every portal skill under `.agents/skills/*/SKILL.md` and runs its CLI first. Shipped country-agnostic CLIs include `linkedin-search` and `freehire-search`.
+`/scrape` discovers every portal skill under `.agents/skills/*/SKILL.md` and runs its CLI first. Shipped country-agnostic CLIs include `linkedin-search`, `freehire-search`, and `remoteok-search`.
 
 ## Search Sites
 
 Primary:
 - **linkedin.com/jobs** - LinkedIn job listings (Remote, UAE, US, Europe, Worldwide)
 - **freehire.me** - Aggregator for 50+ ATS platforms (Lever, Greenhouse, Ashby, Workable)
+- **remoteok.com** - Fully-remote roles worldwide, tech-leaning (now has its own CLI; see `.agents/skills/remoteok-search`)
 
 Secondary:
-- Direct searches on startup/tech job boards (Wellfound, RemoteOK, Y Combinator Jobs, Workatastartup)
+- Direct searches on startup/tech job boards (Wellfound, Y Combinator Jobs, Workatastartup)
 
 ## Query Categories
 
