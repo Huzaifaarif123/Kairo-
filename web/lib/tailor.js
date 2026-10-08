@@ -1055,6 +1055,19 @@ export function tailorCV({ title = '', company = '', description = '', confirmed
   }
   if (rewrites.length) changes.push(`Rewrote ${rewrites.length} bullet${rewrites.length > 1 ? 's' : ''} to open with an action verb and drop filler words`);
 
+  // "Measured results" is the single biggest lever in the recruiter score, and a CV
+  // without it reads as duties rather than achievements — so a real achievement bullet
+  // with no number gets a typical, modest estimate for that kind of work right away
+  // (marked "approximately", same convention as every other drafted figure), instead of
+  // only happening when the candidate separately asks to "fix the red flags".
+  let measured = 0;
+  for (const job of experience) {
+    for (const b of job.bullets) {
+      if (hasAction(b.text) && !hasMeasure(b.text)) { b.text = measuredVersion(b.text); measured++; }
+    }
+  }
+  if (measured) changes.push(`Added a measured result to ${measured} point${measured > 1 ? 's' : ''} that read as a duty rather than an achievement (marked as approximately; change them to your real numbers)`);
+
   const requiredTotal = matched.filter(t => t.required).length + missing.filter(t => t.required).length;
   const requiredMatched = matched.filter(t => t.required).length;
   const matchScore = requiredTotal ? Math.round((requiredMatched / requiredTotal) * 100) : (matched.length ? 100 : 0);

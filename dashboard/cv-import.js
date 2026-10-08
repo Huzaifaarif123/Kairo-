@@ -294,7 +294,13 @@ const CV_HEADINGS = {
 };
 
 function sectionOf(line) {
-  const t = line.trim().replace(/[:：]$/, '').replace(/\s+/g, ' ').toLowerCase();
+  const trimmed = line.trim();
+  // A real section heading never ends mid-sentence. A single wrapped word from a long
+  // bullet ("...and cloud-native" / "technologies.") can otherwise squash down to exactly
+  // "technologies" and get misread as a new Skills section — silently truncating whatever
+  // section was actually being read and scattering the rest of its content.
+  if (/[.,;!?]$/.test(trimmed)) return null;
+  const t = trimmed.replace(/[:：]$/, '').replace(/\s+/g, ' ').toLowerCase();
   if (!t || t.length > 45) return null;
   const letterSpaced = /^[a-z&]+( +[a-z&]+)+$/.test(t) && t.split(' ').filter(w => w.length <= 2).length >= 2;
   if (!letterSpaced && t.split(' ').length > 5) return null;
@@ -604,7 +610,13 @@ function parseProjects(lines) {
       || (/^(.{2,40}?)\.\s+[A-Z]/.test(text) && text.match(/^(.{2,40}?)\.\s+([A-Z].+)$/)?.[1].split(/\s+/).length <= 5
         ? text.match(/^(.{2,40}?)\.\s+([A-Z].+)$/) : null);
     const last = projects[projects.length - 1];
+    // A short, no-period line right after a bare project name — before any bullets or
+    // description have arrived for it — is a tech-tag subtitle ("LLMs", "LLMs, Prompt
+    // engineering, Embeddings, RAG"), not a second project; without this, the project's
+    // own bullets below then attach to this stray tag instead of the real project.
+    const looksLikeTechTag = last && !last.desc && !last.tech && !BULLET_RE.test(line) && text.split(/\s+/).length <= 8 && !/[.]$/.test(text);
     if (named) projects.push({ name: named[1].trim(), desc: named[2].trim() });
+    else if (looksLikeTechTag) last.tech = text;
     else if (text.split(/\s+/).length <= 6 && !/[.]$/.test(text)) projects.push({ name: text, desc: '' });
     else if (last) last.desc = `${last.desc} ${text}`.trim();
     else projects.push({ name: text.split(/\s+/).slice(0, 4).join(' '), desc: text });
@@ -685,7 +697,7 @@ function buildProfileMarkdown(cv, existingMarkdown) {
   if (!cv.experience.length) out.push('<!-- No jobs were recognised. Add them like this:\n### Job Title - Company (2022 – 2025)\nCity, Country / Remote\n- What you achieved\n-->', '');
 
   out.push('## Independent Projects');
-  cv.projects.forEach(p => out.push(`- **${p.name}**${p.desc ? `: ${p.desc}` : ''}`));
+  cv.projects.forEach(p => out.push(`- **${p.name}**${p.tech ? ` (${p.tech})` : ''}${p.desc ? `: ${p.desc}` : ''}`));
   out.push('');
 
   out.push('## Technical Skills', '', '### From CV');
