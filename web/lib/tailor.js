@@ -1055,18 +1055,11 @@ export function tailorCV({ title = '', company = '', description = '', confirmed
   }
   if (rewrites.length) changes.push(`Rewrote ${rewrites.length} bullet${rewrites.length > 1 ? 's' : ''} to open with an action verb and drop filler words`);
 
-  // "Measured results" is the single biggest lever in the recruiter score, and a CV
-  // without it reads as duties rather than achievements — so a real achievement bullet
-  // with no number gets a typical, modest estimate for that kind of work right away
-  // (marked "approximately", same convention as every other drafted figure), instead of
-  // only happening when the candidate separately asks to "fix the red flags".
-  let measured = 0;
-  for (const job of experience) {
-    for (const b of job.bullets) {
-      if (hasAction(b.text) && !hasMeasure(b.text)) { b.text = measuredVersion(b.text); measured++; }
-    }
-  }
-  if (measured) changes.push(`Added a measured result to ${measured} point${measured > 1 ? 's' : ''} that read as a duty rather than an achievement (marked as approximately; change them to your real numbers)`);
+  // Measured results are NOT added by default here — only the wording is tightened above.
+  // Drafting an "approximately N%" estimate onto every un-measured bullet is a real,
+  // visible change to the CV's content (not just phrasing), and doing that to every bullet
+  // on every tailor made the CV read as artificially over-quantified. It stays available on
+  // request: "fix the red flags" (improvePoints) or "add numbers/metrics" (draftNumbers).
 
   const requiredTotal = matched.filter(t => t.required).length + missing.filter(t => t.required).length;
   const requiredMatched = matched.filter(t => t.required).length;
@@ -2058,7 +2051,7 @@ function applyReviewFixes(cv, jdTerms, done, raw, unclear, richPending) {
   const stillMissing = jdTerms.filter(t => t.category !== 'Ways of Working' && t.name !== 'AI' && countMatches(t.re, JSON.stringify(cv)) === 0).map(t => t.name);
   if (stillMissing.length && unclear && raw) {
     unclear.push(`${raw} — weave in ${joinList(stillMissing.slice(0, 6))}, which this job asks for but nothing in the profile shows yet.`);
-    if (richPending) richPending[raw] = `Weave ${joinList(stillMissing.slice(0, 6))} into the experience section — add a real, specific bullet or a skill entry for each one, grounded in the kind of work already on this CV. These are required by the job description but don't appear anywhere on the CV yet.`;
+    if (richPending) richPending[raw] = `Weave ${joinList(stillMissing.slice(0, 6))} into the experience section — these are required by the job description but don't appear anywhere on the CV yet. For each one: pick the single role it fits best (prefer the most recent/senior role, or whichever role's existing tech stack is closest to it — never scatter one keyword across multiple roles), and add it to an EXISTING bullet in that role rather than a new standalone one where that reads naturally, matching that bullet's own length and voice. Write what the person actually did with it, in their own voice — never a sentence that just restates "this job requires X"; it must not read like a checklist response to the job posting.`;
   }
 }
 

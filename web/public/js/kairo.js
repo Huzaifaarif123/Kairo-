@@ -2040,13 +2040,11 @@ function instructLoaded(result) {
   if (box) box.value = '';
   setInstructResult('');
   updateInstructUndo();
-  renderInstructTips();
 }
 
-// After any change to the CV (Edit CV, the style bar, an instruction): refresh the suggestions
-function instructSync() {
-  renderInstructTips();
-}
+// After any change to the CV (Edit CV, the style bar, an instruction): was used to refresh
+// the Suggestions box, removed along with the recruiter-review feature it was built from.
+function instructSync() {}
 
 function updateInstructUndo() {
   const btn = document.getElementById('tailor-instruct-undo');
@@ -2181,83 +2179,6 @@ function instructConfirmSkill(skill) {
   renderTailorScore();
 }
 
-// ---------- Suggestions above the box ----------
-// Plain pointers from the CV review. Clicking one writes the start of the instruction.
-
-const MAX_INSTRUCT_TIPS = 6;
-
-function instructTips() {
-  const rv = tailorResult && tailorResult.review;
-  if (!rv) return [];
-  const tips = [];
-  const seen = new Set();
-  const add = (tip) => {
-    const key = tip.key || tip.line || tip.text;
-    if (seen.has(key)) return;
-    seen.add(key);
-    tips.push(tip);
-  };
-  const x = tailorWs.cv && tailorWs.cv.experience[0];
-  const job = x ? (x.company || x.role) : '';
-  const replace = (line) => `Replace "${line}" with "${line}"`;
-  // Every job should have at least five points
-  for (const j of ((tailorWs.cv && tailorWs.cv.experience) || []).filter(e => e.bullets.length < 5).slice(0, 3)) {
-    const name = j.company || j.role;
-    add({ key: `short:${name}`, text: `${[j.role, j.company].filter(Boolean).join(' at ')} has ${j.bullets.length} point${j.bullets.length === 1 ? '' : 's'}; every job should have at least 5. Add real ones from that job.`, prefill: `Under ${name}, add: ` });
-  }
-  for (const k of rv.recruiter.missingKeywords.filter(k => k.required && k.name !== 'AI').slice(0, 2)) {
-    add({ key: `kw:${k.name}`, text: `The job asks for ${k.name}. If you've used it, add a point about it, or add it to your skills.`, prefill: job ? `Under ${job}, add: ` : 'Add a point: ' });
-  }
-  const contact = rv.recruiter.redFlags.find(f => /contact details/i.test(f.title));
-  if (contact) add({ key: 'contact', text: contact.detail, prefill: /phone/i.test(contact.detail) ? 'Set phone to ' : 'Set email to ' });
-  for (const b of (rv.xyz.weak || []).slice(0, 2)) add({ text: 'Start this point with what you did (Built, Led, Cut, Launched…), not a duty.', line: b.text, prefill: replace(b.text), select: true });
-  for (const b of rv.xyz.needNumbers.slice(0, 3)) add({ text: 'Add a number to this point: how much, how many or how fast (only if you know it).', line: b.text, prefill: replace(b.text), select: true });
-  for (const b of (rv.xyz.long || []).slice(0, 1)) add({ text: `Shorten this point to one or two lines (it has ${b.words} words).`, line: b.text, prefill: replace(b.text), select: true });
-  for (const sec of rv.skim.sections) {
-    if (sec.verdict === 'read' || !sec.fix || /^Experience|^Header/.test(sec.section)) continue;
-    const prefill = sec.section === 'Skills' ? 'Add skills: ' : sec.section === 'Summary' ? 'Add to summary: ' : '';
-    add({ key: sec.section, text: `${sec.section}: ${sec.reason} ${sec.fix}`, prefill });
-  }
-  for (const f of rv.recruiter.redFlags) {
-    if (/required skill|contact details|measurable results|Duty-style|Dense bullets/i.test(f.title)) continue;
-    add({ text: `${f.title}: ${f.fix}` });
-  }
-  return tips;
-}
-
-function renderInstructTips() {
-  const box = document.getElementById('tailor-instruct-tips');
-  if (!box) return;
-  const tips = instructTips();
-  window.__instructTips = tips;
-  if (!tips.length) {
-    box.innerHTML = '<p class="cv-tips-ok">Looks good: nothing major to fix for this job.</p>';
-    return;
-  }
-  const shown = tips.slice(0, MAX_INSTRUCT_TIPS);
-  const quote = (t) => (t.line ? `<span class="cv-tip-line">${escapeHtml(t.line.length > 90 ? `${t.line.slice(0, 90)}…` : t.line)}</span>` : '');
-  box.innerHTML = `<p class="cv-tips-title">Suggestions <span>${tips.length}</span></p><ol class="cv-tips">${shown.map((t, i) => `
-    <li><button type="button" class="cv-tip" onclick="useInstructTip(${i})"${t.prefill ? ' title="Start this change in the box below"' : ' disabled'}>
-      <span class="cv-tip-text">${escapeHtml(t.text)}</span>${quote(t)}</button></li>`).join('')}</ol>${tips.length > MAX_INSTRUCT_TIPS ? `<p class="cv-tips-more">${tips.length - MAX_INSTRUCT_TIPS} more after you fix these.</p>` : ''}`;
-}
-
-// Start the instruction for a suggestion in the box (on a new line if there's text)
-function useInstructTip(i) {
-  const tip = (window.__instructTips || [])[i];
-  const box = document.getElementById('tailor-instruct');
-  if (!tip || !tip.prefill || !box) return;
-  const before = box.value.replace(/\s+$/, '');
-  box.value = before ? `${before}\n${tip.prefill}` : tip.prefill;
-  box.focus();
-  if (tip.select) {
-    // select the second copy of the point, the part to rewrite
-    const end = box.value.length - 1;
-    const start = end - tip.line.length;
-    box.setSelectionRange(start, end);
-  } else box.setSelectionRange(box.value.length, box.value.length);
-  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
 // ---------- Upload the job description ----------
 
 async function handleTailorJdFile(input) {
@@ -2340,7 +2261,8 @@ function questionHasSpecificCategory(q) {
 // An answer from this CV's review: score, gaps, red flags, what to improve, length
 function answerInstructQuestion(q) {
   const r = tailorResult;
-  if (!r || !r.review) return 'Tailor a CV first, then ask again.';
+  if (!r) return 'Tailor a CV first, then ask again.';
+  if (!r.review) return "Score, red flags and skim questions aren't available anymore — that review feature was removed. Try asking me to add, remove or change something instead.";
   const rv = r.review;
   const a = r.analysis;
   const list = (xs) => xs.map(x => escapeHtml(x)).join(', ');
