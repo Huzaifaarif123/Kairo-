@@ -9,24 +9,16 @@ let instructUndo = [];   // earlier versions of the CV, for "Undo last change"
 // "Skip fact-check" checkbox: the honesty check is archived (off) for now, by default —
 // the code stays in place (see validateWholeCvEdit/mergeRewrite in tailor.js/ai-tailor.ts)
 // so it can be switched back on in one click; it's not deleted, just not applied unless
-// this box is unchecked. Remembered in this browser (localStorage). The warning banner
-// still shows on every request it's used for, so it's never silent even while archived.
-const INSTRUCT_UNFILTERED_KEY = 'kairoInstructUnfiltered';
+// this box is unchecked. Always starts checked on every page load — no stored memory of a
+// previous session's choice, so an old "off" state never silently sticks around. The
+// warning banner still shows on every request it's used for, so it's never silent anyway.
 function instructUnfiltered() {
   const box = document.getElementById('tailor-instruct-unfiltered');
   return Boolean(box && box.checked);
 }
 function initInstructUnfiltered() {
   const box = document.getElementById('tailor-instruct-unfiltered');
-  if (!box) return;
-  try {
-    const saved = localStorage.getItem(INSTRUCT_UNFILTERED_KEY);
-    // No saved preference yet: default to checked (checks archived) rather than off
-    box.checked = saved === null ? true : saved === '1';
-  } catch { box.checked = true; }
-  box.addEventListener('change', () => {
-    try { localStorage.setItem(INSTRUCT_UNFILTERED_KEY, box.checked ? '1' : '0'); } catch {}
-  });
+  if (box) box.checked = true;
 }
 
 // Called after each tailoring run

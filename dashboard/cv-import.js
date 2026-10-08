@@ -515,12 +515,21 @@ function parseEducation(lines) {
     if (EDU_WORDS.test(line)) {
       const pieces = line.split(/\s*(?:\||·|•|—|–|\s-\s|,\s|\.\s(?=[A-Z])|\s{3,})\s*/).map(s => s.trim()).filter(Boolean);
       // The degree is everything before the institution: "Bachelor of Science, Computer Science"
-      const schoolAt = pieces.findIndex(p => SCHOOL_WORDS.test(p) && !EDU_WORDS.test(p));
+      let schoolAt = pieces.findIndex(p => SCHOOL_WORDS.test(p) && !EDU_WORDS.test(p));
       const degreeStart = pieces.findIndex(p => EDU_WORDS.test(p));
+      // No recognized school keyword ("UT Austin", "NYU", "UCLA" and similar abbreviated
+      // names aren't in SCHOOL_WORDS): the piece after the degree is still the institution
+      // in the common "Degree - Institution (years)" shape, so fall back to the last piece
+      // that isn't just a year, rather than silently dropping the degree's own subject.
+      if (schoolAt === -1 && pieces.length > degreeStart + 1) {
+        const lastNonYear = pieces.length - 1 - [...pieces].reverse().findIndex(p => !/^\(?(?:19|20)\d{2}/.test(p) && !RANGE_RE.test(p));
+        if (lastNonYear > degreeStart) schoolAt = lastNonYear;
+      }
       const degreeParts = pieces.slice(degreeStart, schoolAt > degreeStart ? schoolAt : degreeStart + 1)
         .filter(p => !PLACE_WORDS.test(p) && !RANGE_RE.test(p) && !/^\(?(?:19|20)\d{2}/.test(p));
       const degree = (degreeParts.join(', ') || line).replace(RANGE_RE, '').replace(YEAR_RE, '').replace(/[()]/g, '').replace(/[.,]\s*$/, '').trim();
-      const school = pieces.find(p => SCHOOL_WORDS.test(p) && !EDU_WORDS.test(p)) || '';
+      const school = (pieces.find(p => SCHOOL_WORDS.test(p) && !EDU_WORDS.test(p)) || pieces[schoolAt] || '')
+        .replace(RANGE_RE, '').replace(YEAR_RE, '').replace(/[()]/g, '').replace(/[.,]\s*$/, '').trim();
       if (entry && !entry.degree) {
         entry.degree = degree;
         entry.school = entry.school || school;

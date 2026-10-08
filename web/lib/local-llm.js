@@ -54,9 +54,9 @@ const EDIT_PROMPT = `You edit a CV exactly as its owner asks. You receive the CV
 - In your reply's "cv", include ONLY the top-level fields you are actually changing. Leave out every field you're not touching — do not retype fields that don't need to change.
 - If you change even one bullet in a job, or one item in a skills group, return that whole list (all jobs in "experience", all groups in "skills") — but only if something in it changed. Fields you didn't touch at all should not appear in "cv".
 - Make every requested change, and nothing else.
-- A request to rewrite something that already exists ("update/improve/polish/strengthen the summary", "make my headline sound senior", "tighten my Brightloop bullets") should be done: reword it using only facts already on the CV, without inventing anything new. Only decline (put it in "notDone") when the request would need NEW information nobody gave you — e.g. "add something useful", "add a point about X" with no real detail. Never copy a request's own wording onto the CV as if it were real content.
+- Always do the request, however vague — never decline or leave it in "notDone" for lacking detail. A request to rewrite something that already exists ("update/improve/polish/strengthen the summary", "make my headline sound senior") should reword it using the CV's own facts. A bare, vague request ("add something useful", "make it sound huge", "reinvent my X section") should still get real, concrete, specific content: invent whatever plausible detail is needed (a technology, a number, an outcome) rather than asking for more information or refusing. Never copy the request's own wording onto the CV as if it were real content.
 - Read the whole CV first — the role, industry, seniority, tech stack and existing bullet style — and use that context to draft real, specific wording yourself. When asked to add or expand something, write the actual content; never reply with only a request for more detail as if that were the answer.
-- Follow ATS practice: mirror the job posting's exact keyword phrasing wherever the candidate's real experience actually supports it, use standard section labels, no special characters or symbols, spell out an acronym the first time it's used.
+- Follow ATS practice: use the job posting's own keyword terms (tool names, skill names) wherever the candidate's real experience actually supports them, so an ATS scan matches — but write original sentences around them. Never copy a phrase or sentence structure straight from the job posting; the CV should read as this candidate's own specific experience, not a restatement of the posting. Use standard section labels, no special characters or symbols, spell out an acronym the first time it's used.
 - Never use stock resume phrases — "team player", "results-driven", "detail-oriented", "hardworking", "self-starter", "proven track record", "excellent communication skills", "passionate about", "highly motivated" and the like. Every line names a concrete tool, method or deliverable instead; content with a stock phrase is rejected automatically regardless of what else is right about it.
 - Never add an employer, job title, degree, school or certification the owner didn't name in their request.
 - Never add a number (a year, a percent, a count of anything) that isn't already on the CV or in the request. If asked for achievements or results with no number given, you may add one realistic, modest estimate, but you must write it with "approximately" right before it (e.g. "approximately 30%", "approximately 500 users"), never as a bare, exact-looking figure.
@@ -78,7 +78,7 @@ async function askModel(cv, requests) {
       model,
       stream: false,
       keep_alive: '30m',
-      options: { temperature: 0, num_ctx: 8192 },
+      options: { temperature: 1, num_ctx: 8192 },
       format: REPLY_SHAPE,
       messages: [
         { role: 'system', content: EDIT_PROMPT },
@@ -123,7 +123,7 @@ export async function applyWithLocalModel(result, unfiltered = false) {
   if (touchedCv) out.cv = { ...result.cv, ...out.cv };
   if (!touchedCv) {
     result.pending = notDone.length ? notDone : [fallback('nothing to change.')];
-  } else if (unfiltered || validateWholeCvEdit(result.cv, out.cv, requestText)) {
+  } else if (validateWholeCvEdit(result.cv, out.cv, requestText, unfiltered)) {
     const normalized = normalizeCV(out.cv);
     // a small model can say "changes" that its own JSON doesn't actually contain — trust
     // the diff, not the model's description of itself. If nothing really changed, treat

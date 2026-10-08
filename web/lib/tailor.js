@@ -1837,6 +1837,34 @@ const NUMBER_DRAFTS = [
 ];
 const DEFAULT_DRAFT = 'improving delivery speed by approximately 20%';
 
+// Extra context to round out a bullet that's already a real action and a measured result
+// but still short of a requested length — who it involved, how it was approached. Drafted,
+// not verified; the caller marks it clearly so it gets checked before being trusted.
+const ELABORATION_CLAUSES = [
+  [/\b(test(s|ing)?|jest|cypress|pytest|qa)\b/i, 'working closely with QA to catch regressions before release'],
+  [/\b(payments?|checkout|billing|orders?|transactions?|invoic\w*|stripe)\b/i, 'coordinating with finance and compliance to keep the flow audit-ready'],
+  [/\b(ci\/cd|pipelines?|deploy\w*|releases?|github actions|gitlab ci|docker|kubernetes)\b/i, 'working with the platform team to keep rollouts smooth and low-risk'],
+  [/\b(performance|optimi[sz]\w*|latency|faster|speed|load(ing)? time|lighthouse|caching|cache|index\w*|quer(y|ies))\b/i, 'profiling bottlenecks and iterating with the team on fixes'],
+  [/\b(monitor\w*|observability|logging|alert\w*|sentry|grafana|datadog|prometheus|on[- ]?call|incident|outage|pager|escalat\w*)\b/i, 'working with on-call engineers to resolve issues quickly'],
+  [/\b(automat\w*|scripts?|workflows?)\b/i, 'documenting the process so the rest of the team could adopt it'],
+  [/\b(mentor\w*|led|lead|team|coach\w*|review\w*)\b/i, 'providing regular feedback and pairing sessions to support growth'],
+  [/\b(data|etl|elt|reports?|analytics|warehouse|spark|airflow)\b/i, 'working with stakeholders to define accurate, reliable reporting'],
+  [/\b(apis?|services?|backend|microservices?|endpoints?|server)\b/i, 'collaborating with the frontend team on a stable, well-documented contract'],
+  [/\b(dashboards?|ui|interfaces?|frontend|front-end|pages?|sites?|website|app|apps|screens?|components?)\b/i, 'incorporating user feedback to refine the experience'],
+  [/\b(security|auth\w*|permissions?|compliance)\b/i, 'working with security to align with company policy']
+];
+const DEFAULT_ELABORATION = 'coordinating closely with the team to keep the work on track';
+// Further generic context, added one at a time after the matched elaboration above when a
+// long target (e.g. "5 lines") still isn't reached — kept distinct from each other so
+// stacking a few doesn't just repeat the same idea.
+const GENERIC_ELABORATIONS = [
+  'coordinating closely with cross-functional stakeholders throughout',
+  'documenting the approach so the rest of the team could follow it',
+  'iterating based on feedback from peers and leads',
+  'balancing scope, timeline and quality along the way',
+  'keeping the team updated on progress and any blockers'
+];
+
 // Naming just a topic ("on call and incident response", "mentoring") rather than a
 // finished sentence is still a real request — a plausible, honestly-marked draft point is
 // built for it (same ~estimate convention as measuredVersion below) rather than either
@@ -1918,7 +1946,7 @@ function improvePoints(cv, jobs) {
 function setBulletLineLength(cv, targetWords, done) {
   const min = Math.max(6, targetWords - Math.ceil(WORDS_PER_LINE / 2));
   const max = targetWords + Math.ceil(WORDS_PER_LINE / 2);
-  let trimmed = 0, grown = 0, short = 0;
+  let trimmed = 0, grown = 0, elaborated = 0;
   for (const x of cv.experience) {
     x.bullets = x.bullets.map(b => {
       if (words(b) > max) {
@@ -1932,8 +1960,22 @@ function setBulletLineLength(cv, targetWords, done) {
         let t = polishBullet(b);
         if (!hasAction(t)) t = `Delivered ${t[0].toLowerCase()}${t.slice(1)}`;
         if (!hasMeasure(t)) t = measuredVersion(t);
+        // Still short after a real action + measured result: round it out with plausible
+        // context (who it was coordinated with, how it was approached) rather than leaving
+        // it short — drafted, not verified, same as the measured estimate above. Keeps
+        // adding distinct context until the target is actually reached (a long target like
+        // "5 lines" needs more than one clause), not just one pass.
+        if (words(t) < min) {
+          const clause = (ELABORATION_CLAUSES.find(([re]) => re.test(t)) || [null, DEFAULT_ELABORATION])[1];
+          t = `${t.replace(/\.$/, '')}, ${clause}.`;
+          let i = 0;
+          while (words(t) < min && i < GENERIC_ELABORATIONS.length) {
+            t = `${t.replace(/\.$/, '')}, ${GENERIC_ELABORATIONS[i]}.`;
+            i++;
+          }
+          elaborated++;
+        }
         if (t !== b) grown++;
-        if (words(t) < min) short++;
         return t;
       }
       return b;
@@ -1941,14 +1983,14 @@ function setBulletLineLength(cv, targetWords, done) {
   }
   const lines = Math.round(targetWords / WORDS_PER_LINE) || 1;
   const label = `about ${lines} line${lines > 1 ? 's' : ''}`;
-  if (!trimmed && !grown && !short) { done.push(`Your points are already ${label} each`); }
-  else if (trimmed || grown) {
+  if (!trimmed && !grown) { done.push(`Your points are already ${label} each`); }
+  else {
     const parts = [];
     if (grown) parts.push(`strengthened ${grown} short point${grown > 1 ? 's' : ''} (marked as approximately; change them to your real numbers)`);
     if (trimmed) parts.push(`trimmed ${trimmed} long point${trimmed > 1 ? 's' : ''} to fit`);
     done.push(`Resized your experience points toward ${label} each: ${parts.join(' and ')}`);
   }
-  if (short) done.push(`${short} point${short > 1 ? 's' : ''} couldn't reach ${label} from what's already on the CV — they're already a clear action and a measured result, so growing them further needs more real detail (the tool used, the scale, the context) rather than padding`);
+  if (elaborated) done.push(`${elaborated} point${elaborated > 1 ? 's' : ''} got extra drafted context to reach the full length — check it's actually true and edit it to what really happened`);
 }
 
 /** Removes a stock phrase and tidies the punctuation/spacing left behind. */
@@ -2057,33 +2099,40 @@ function editNumbers(s) {
  * @param {any} original the CV before the edit
  * @param {any} edited what the AI returned
  * @param {string} requestText the request(s) that were asked, joined together
+ * @param {boolean} [unfiltered] skips only the fact-invention checks (new employer/
+ * school/certification names, new unmarked numbers) — an explicit, user-visible opt-in.
+ * The quality checks (no filler/no-content lines, no stock resume phrases) always run
+ * regardless: "don't fact-check this" and "don't care if it reads well" are different
+ * asks, and turning one off was never meant to turn off the other.
  */
-export function validateWholeCvEdit(original, edited, requestText) {
+export function validateWholeCvEdit(original, edited, requestText, unfiltered = false) {
   if (!edited || typeof edited !== 'object' || !edited.name || !String(edited.name).trim()) return false;
   // never silently wipe out all experience
   if (original.experience && original.experience.length && edited.experience && !edited.experience.length) return false;
-  const asked = String(requestText || '').toLowerCase();
-  const was = (list) => new Set((list || []).map(x => String(x).toLowerCase()));
-  const companies = was((original.experience || []).map(x => x.company));
-  const schools = was((original.education || []).map(e => e.school));
-  const certs = was(original.certifications || []);
-  const namesOk = (edited.experience || []).every(x => companies.has(String(x.company).toLowerCase()) || asked.includes(String(x.company).toLowerCase()))
-    && (edited.education || []).every(e => schools.has(String(e.school).toLowerCase()) || asked.includes(String(e.school).toLowerCase()))
-    && (edited.certifications || []).every(c => certs.has(String(c).toLowerCase()) || asked.includes(String(c).toLowerCase()));
-  if (!namesOk) return false;
-  // every number in the result must already be on the CV, in the request, or marked as
-  // an estimate ("approximately 30%", "about 500 users")
-  const allowed = new Set([...editNumbers(JSON.stringify(original)), ...editNumbers(requestText)]);
-  const re = /((?:approximately|about)\s+)?\b\d[\d,.]*\b/gi;
-  let m;
-  const text = JSON.stringify(edited);
-  while ((m = re.exec(text))) {
-    const n = m[0].replace(/^(?:approximately|about)\s+/i, '').replace(/[,.]$/, '').replace(/,/g, '');
-    if (!allowed.has(n) && !m[1]) return false;
+  if (!unfiltered) {
+    const asked = String(requestText || '').toLowerCase();
+    const was = (list) => new Set((list || []).map(x => String(x).toLowerCase()));
+    const companies = was((original.experience || []).map(x => x.company));
+    const schools = was((original.education || []).map(e => e.school));
+    const certs = was(original.certifications || []);
+    const namesOk = (edited.experience || []).every(x => companies.has(String(x.company).toLowerCase()) || asked.includes(String(x.company).toLowerCase()))
+      && (edited.education || []).every(e => schools.has(String(e.school).toLowerCase()) || asked.includes(String(e.school).toLowerCase()))
+      && (edited.certifications || []).every(c => certs.has(String(c).toLowerCase()) || asked.includes(String(c).toLowerCase()));
+    if (!namesOk) return false;
+    // every number in the result must already be on the CV, in the request, or marked as
+    // an estimate ("approximately 30%", "about 500 users")
+    const allowed = new Set([...editNumbers(JSON.stringify(original)), ...editNumbers(requestText)]);
+    const re = /((?:approximately|about)\s+)?\b\d[\d,.]*\b/gi;
+    let m;
+    const text = JSON.stringify(edited);
+    while ((m = re.exec(text))) {
+      const n = m[0].replace(/^(?:approximately|about)\s+/i, '').replace(/[,.]$/, '').replace(/,/g, '');
+      if (!allowed.has(n) && !m[1]) return false;
+    }
   }
-  // A vague request ("make it better", "optimize this") must never come back as a new or
-  // changed bullet that itself says nothing concrete — that's the model echoing the
-  // instruction (or padding with filler) instead of declining it.
+  // Quality bar — always enforced, fact-check on or off: a vague request ("make it
+  // better", "optimize this") must never come back as a new or changed bullet that
+  // itself says nothing concrete, and no stock resume phrase in anything new or changed.
   const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
   const origLines = new Set([
     ...(original.experience || []).flatMap(x => x.bullets || []),
@@ -2096,9 +2145,6 @@ export function validateWholeCvEdit(original, edited, requestText) {
     edited.summary
   ].filter(Boolean);
   if (newLines.some(l => !origLines.has(norm(l)) && hasNoConcreteContent(l))) return false;
-  // Same bar as the rule engine's own generated content: no stock resume phrase in
-  // anything new or changed, from any AI backend — a cliché isn't a fabricated fact, so
-  // the checks above let it through, but it's still not real, specific content.
   if (newLines.some(l => !origLines.has(norm(l)) && hasCliche(l))) return false;
   return true;
 }
@@ -2107,10 +2153,10 @@ export function validateWholeCvEdit(original, edited, requestText) {
  * Apply plain instructions to a CV. One instruction per line (or separated by ";").
  * @param {any} input the CV
  * @param {string} text the instructions
- * @param {{ whole?: boolean, job?: { title?: string, description?: string } | null }} [options]
+ * @param {{ whole?: boolean, job?: { title?: string, description?: string } | null, unfiltered?: boolean }} [options]
  * @returns {{ cv: any, done: string[], unclear: string[], skills: string[], pending: string[] }}
  */
-export function applyInstructions(input, text, { whole = false, job = null } = {}) {
+export function applyInstructions(input, text, { whole = false, job = null, unfiltered = false } = {}) {
   const cv = normalizeCV(input);
   const done = [], unclear = [], skills = [];
   // the posting's skills, when the job is known (for "add more skills into my experience")
@@ -2145,8 +2191,20 @@ export function applyInstructions(input, text, { whole = false, job = null } = {
     // A general "add certifications": certifications are added only by name
     if (!/["“:]/.test(line) && /\b(?:certifications?|certificates?|certs?)\b/i.test(line) && !/^(?:remove|delete|drop)\b/i.test(line)
       && !/^add\s+.+\s+(?:to|in|under|into)\s+(?:my\s+|the\s+)?certifications?\b/i.test(line)) {
-      const fits = [...new Set(Object.entries(CERTIFICATIONS_FOR).filter(([k]) => countMatches(TERMS.find(t => t.name === k)?.re || /$^/, JSON.stringify(cv)) > 0).map(([, v]) => v))].slice(0, 4);
-      unclear.push(`${raw} — I only add certifications you name, so nothing untrue ends up on the CV. Write e.g. "Add certification: ${fits[0] || 'AWS Certified Developer – Associate'}" for each one you actually hold${fits.length > 1 ? `; these fit the job: ${fits.join(', ')}` : ''}.`);
+      // What the job asks for comes first; only fall back to what's already on the CV
+      // when there's no job description to go by at all.
+      const jdNames = new Set(jdTerms.map(t => t.name));
+      const fits = [...new Set(Object.entries(CERTIFICATIONS_FOR)
+        .filter(([k]) => jdNames.size ? jdNames.has(k) : countMatches(TERMS.find(t => t.name === k)?.re || /$^/, JSON.stringify(cv)) > 0)
+        .map(([, v]) => v))].slice(0, 4);
+      if (unfiltered) {
+        const toAdd = (fits.length ? fits : ['AWS Certified Developer – Associate']).filter(c => !cv.certifications.includes(c));
+        cv.certifications.push(...toAdd);
+        if (toAdd.length) done.push(`Added ${toAdd.length > 1 ? 'certifications' : 'the certification'} ${joinList(toAdd)} — drafted to fit this job, not verified you hold ${toAdd.length > 1 ? 'them' : 'it'}`);
+        else done.push('Your matching certifications are already listed');
+      } else {
+        unclear.push(`${raw} — I only add certifications you name, so nothing untrue ends up on the CV. Write e.g. "Add certification: ${fits[0] || 'AWS Certified Developer – Associate'}" for each one you actually hold${fits.length > 1 ? `; these fit the job: ${fits.join(', ')}` : ''}.`);
+      }
       continue;
     }
     // "In the VoiceGlow project change the first point to …", "under Paywise replace the
@@ -2294,6 +2352,22 @@ export function applyInstructions(input, text, { whole = false, job = null } = {
       applyReviewFixes(cv, jdTerms, done);
       continue;
     }
+    // "Each bullet point should have 2 lines", "I want 2 lines per bullet point", "add
+    // more lines like 5 of them in bullet points", "make each point ~25 words": a
+    // specific target length per bullet. The number and the "lines/words" unit don't
+    // need to sit right next to "bullet point(s)" — just all three present in the line —
+    // so loose phrasing still matches; checked before the generic "improve points" rule
+    // below since a specific number here is a more specific request than "make it better".
+    if (/\b(?:bullet\s*points?|points?|bullets?)\b/i.test(line) && (m = line.match(/\b(lines?|words?)\b/i))
+      && cv.experience.length) {
+      const numMatch = line.match(/\b(\d+)\b/);
+      if (numMatch) {
+        const n = parseInt(numMatch[1], 10);
+        const unit = /line/i.test(m[1]) ? 'line' : 'word';
+        setBulletLineLength(cv, unit === 'line' ? n * WORDS_PER_LINE : n, done);
+        continue;
+      }
+    }
     // "Improve the points of experience", "make my Brightloop points stronger", "add more
     // experience", "update the CV to have more changes in the experiences": all vague
     // requests for "more" in the experience section, with no specific content given, are
@@ -2335,14 +2409,6 @@ export function applyInstructions(input, text, { whole = false, job = null } = {
       else done.push('Your summary is already short');
       continue;
     }
-    // "Each bullet point in experience should have 2 lines", "make each point ~25 words":
-    // a specific target length per bullet, not just "shorter"
-    if ((m = line.match(/\b(?:bullet\s*points?|points?|bullets?)\b[\s\S]*?\b(\d+)\s*(?:-)?\s*(lines?|words?)\b/i)) && cv.experience.length) {
-      const n = parseInt(m[1], 10);
-      const unit = /line/i.test(m[2]) ? 'line' : 'word';
-      setBulletLineLength(cv, unit === 'line' ? n * WORDS_PER_LINE : n, done);
-      continue;
-    }
     if (/\b(?:shorten|shorter|trim|condense|concise|tighten)\b/i.test(line) && /\b(?:points?|bullets?|lines|experience)\b/i.test(line)) {
       let n = 0;
       const tidy = (b) => { if (words(b) <= 22) return b; const c = b.replace(/[.\s]+$/, '').replace(VAGUE_ENDING, ''); if (c !== b.replace(/[.\s]+$/, '')) { n++; return `${c}.`; } return b; };
@@ -2374,7 +2440,11 @@ export function applyInstructions(input, text, { whole = false, job = null } = {
     if ((m = line.match(/^add\s+(?:a\s+|my\s+)?(?:certification|certificate|cert)\s*:?\s*(.+)$/i))) {
       const name = extractCertName(m[1]);
       if (looksLikeCertName(name)) { cv.certifications.push(name.replace(/[.]$/, '')); done.push(`Added the certification "${name.replace(/[.]$/, '')}"`); }
-      else unclear.push(`${raw} — I only add certifications you name, so nothing untrue ends up on the CV. Write e.g. "Add certification: AWS Certified Developer – Associate" for one you actually hold.`);
+      else if (unfiltered) {
+        const fit = Object.entries(CERTIFICATIONS_FOR).find(([k]) => jdTerms.length ? jdTerms.some(t => t.name === k) : countMatches(TERMS.find(t => t.name === k)?.re || /$^/, JSON.stringify(cv)) > 0)?.[1] || 'AWS Certified Developer – Associate';
+        if (!cv.certifications.includes(fit)) { cv.certifications.push(fit); done.push(`Added the certification "${fit}" — drafted to fit this job, not verified you hold it`); }
+        else done.push(`"${fit}" is already listed`);
+      } else unclear.push(`${raw} — I only add certifications you name, so nothing untrue ends up on the CV. Write e.g. "Add certification: AWS Certified Developer – Associate" for one you actually hold.`);
       continue;
     }
     if ((m = line.match(/^add\s+(?:a\s+|my\s+)?(?:degree|education)\s*:?\s*(.+)$/i))) {

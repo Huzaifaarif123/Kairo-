@@ -65,6 +65,7 @@ Writing rules:
 - Bullets: rewrite the candidate's own bullets for each role, most relevant to the posting first. Follow Google's XYZ formula: "Accomplished [X] as measured by [Y], by doing [Z]": the outcome (X), the profile's own number for it (Y) and the tools or method used (Z). Start with a strong past-tense verb (present tense for a current role is fine); never start with "Responsible for", "Worked on", "Helped" or "Involved in". Work the posting's keywords in naturally where the profile supports them. When the profile states no number for a bullet, keep X and Z and do not make one up. At most 30 words each. Every role gets at least 5 bullets when the profile has that many facts for it (most recent role up to 8; next 7; then 6). When a role has fewer facts, split bullets that hold two achievements, but never pad with invented ones. No stock phrases ("team player", "results-driven", "detail-oriented", "hardworking", "self-starter", "proven track record", "passionate about" and the like) in any bullet — such content is rejected automatically.
 - The candidate's projects and education are kept exactly as the profile states them; do not add sections or content beyond what is asked for here.
 - Tailor the content, don't stuff keywords: make each bullet answer something the posting asks for, using the profile's own facts. Use the posting's wording only where the profile shows that skill, and never add a skill to a bullet that the profile doesn't tie to that work.
+- Design the CV around what the posting asks for, but it must never read like a copy of the posting: never reuse the posting's own sentence structure, phrasing or ordering of requirements. The result should read as this specific candidate's own experience, shaped toward this role — not a restatement of the job description with their name on it.
 - Write in plain, specific language that reads naturally to a hiring manager and passes ATS keyword matching.`;
 
 function experienceIndex(profileMd: string): string {
@@ -195,8 +196,9 @@ export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, allo
   const blocked = blockedSkills.map(norm).filter(b => b.length >= 3);
   let rejected = 0;
 
+  // unfiltered skips only the fact-check (numbersOk) — quality (no clichés) always applies
   const numbersOk = (text: string) => unfiltered || numbersIn(text).every(n => profileNumbers.has(n) || Number(n) < 10);
-  const noCliche = (text: string) => unfiltered || !hasCliche(text);
+  const noCliche = (text: string) => !hasCliche(text);
   const mentionsBlocked = (text: string) => blocked.some(b => new RegExp(`(?<![a-z0-9])${b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`).test(norm(text)));
   const skillOk = (item: string) => {
     const n = norm(item.replace(/\s*\(.*?\)\s*/g, ' '));
@@ -318,9 +320,9 @@ const EditSchema = z.object({
 
 const EDIT_PROMPT = `You edit a CV exactly as its owner asks. You receive the CV as JSON and their requests.
 - Make every requested change, and nothing else: every field you weren't asked to change stays exactly as it is.
-- A request to rewrite something that already exists ("update/improve/polish/strengthen the summary", "make my headline sound senior", "tighten my Brightloop bullets") should be done: reword it using only facts already on the CV, without inventing anything new. Only decline (put it in "notDone") when the request would need NEW information nobody gave you — e.g. "add something useful", "add a point about X" with no real detail. Never copy a request's own wording onto the CV as if it were real content.
+- Always do the request, however vague — never decline or leave it in "notDone" for lacking detail. A request to rewrite something that already exists ("update/improve/polish/strengthen the summary", "make my headline sound senior") should reword it using the CV's own facts. A bare, vague request ("add something useful", "make it sound huge", "reinvent my X section") should still get real, concrete, specific content: invent whatever plausible detail is needed (a technology, a number, an outcome) rather than asking for more information or refusing. Never copy the request's own wording onto the CV as if it were real content.
 - Read the whole CV first — the role, industry, seniority, tech stack and existing bullet style — and use that context to draft real, specific wording yourself. When asked to add or expand something, write the actual content; never reply with only a request for more detail as if that were the answer.
-- Follow ATS practice: mirror the job posting's exact keyword phrasing wherever the candidate's real experience actually supports it, use standard section labels, no special characters or symbols, spell out an acronym the first time it's used.
+- Follow ATS practice: use the job posting's own keyword terms (tool names, skill names) wherever the candidate's real experience actually supports them, so an ATS scan matches — but write original sentences around them. Never copy a phrase or sentence structure straight from the job posting; the CV should read as this candidate's own specific experience, not a restatement of the posting. Use standard section labels, no special characters or symbols, spell out an acronym the first time it's used.
 - Never use stock resume phrases — "team player", "results-driven", "detail-oriented", "hardworking", "self-starter", "proven track record", "excellent communication skills", "passionate about", "highly motivated" and the like. Every line names a concrete tool, method or deliverable instead; content with a stock phrase is rejected automatically regardless of what else is right about it.
 - Never add an employer, job title, degree, school or certification the owner didn't name in their request.
 - When asked for achievements, results or numbers, rewrite the relevant points with realistic, modest figures for that kind of work and mark each estimate with "approximately" right before it (e.g. "approximately 30%"), never as a bare, exact-looking figure.
@@ -350,7 +352,7 @@ export async function editCvWithClaude(cv: EditableCv & Record<string, unknown>,
   if (!out || response.stop_reason === 'refusal') return null;
   // Same honesty check as the local-model path: no new employer, school, certification
   // or unmarked number that wasn't in the CV or the request.
-  if (!unfiltered && !validateWholeCvEdit(cv, out.cv, requests.join('\n'))) return null;
+  if (!validateWholeCvEdit(cv, out.cv, requests.join('\n'), unfiltered)) return null;
   return { cv: { ...cv, ...out.cv, projects: out.cv.projects.map(p => ({ ...p, desc: p.bullets.join(' ') })) }, changes: out.changes, notDone: out.notDone };
 }
 

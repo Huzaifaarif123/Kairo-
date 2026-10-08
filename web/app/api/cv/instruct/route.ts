@@ -33,7 +33,7 @@ export async function POST(req: Request) {
   const unfiltered = body.unfiltered === true;
 
   const working = scope ? scopeCV(body.cv, scope) : body.cv;
-  const result = applyInstructions(working, scope ? scopeText(text, scope, body.cv) : text, { job: jobInput });
+  const result = applyInstructions(working, scope ? scopeText(text, scope, body.cv) : text, { job: jobInput, unfiltered });
   if (aiConfigured && result.pending.length) {
     try {
       const edit = await editCvWithClaude(result.cv, result.pending, unfiltered);

@@ -287,7 +287,7 @@ const server = http.createServer(async (req, res) => {
         // (an explicit, user-visible toggle) asks for an unverified draft. Never the
         // default: without it the AI can invent technologies, numbers or employers.
         const unfiltered = data.unfiltered === true;
-        const result = applyInstructions(sc ? scopeCV(data.cv, sc) : data.cv, sc ? scopeText(text, sc, data.cv) : text, { job: { title: String(job.title || '').slice(0, 200), description: String(job.description || '').slice(0, 30000) } });
+        const result = applyInstructions(sc ? scopeCV(data.cv, sc) : data.cv, sc ? scopeText(text, sc, data.cv) : text, { job: { title: String(job.title || '').slice(0, 200), description: String(job.description || '').slice(0, 30000) }, unfiltered });
         let cloud = false;
         if (result.pending.length > 0 && cloudAiConfigured) {
           const pendingBefore = [...result.pending];
