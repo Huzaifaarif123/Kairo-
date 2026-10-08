@@ -1096,7 +1096,6 @@ export function tailorCV({ title = '', company = '', description = '', confirmed
   return {
     job: { title, company },
     coverage: cvCoverage(cv, matched),
-    review: reviewCV(cv, { title, description }, profile, matched, missing, rewrites, visibleSections(layoutId, styles)),
     template: layoutId,
     analysis: {
       matchScore,
@@ -1598,7 +1597,10 @@ function weaveSkills(cv, jdTerms, done) {
   }
   if (placed.length) done.push(`Worked ${joinList(placed)} into related points, next to tools of the same kind`);
   if (kept.length) done.push(`Kept ${joinList(kept.slice(0, 6))} in your skills only: no point uses a related tool`);
-  if (!placed.length && !kept.length) done.push('Your points already show the skills this job asks for');
+  // Not "your points already show the skills this job asks for" — that overclaims when the
+  // job also asks for skills nowhere on the CV at all; this only means there was nothing
+  // already-listed-but-unused to move into a bullet.
+  if (!placed.length && !kept.length) done.push('Nothing to weave: your skills list already matches your points');
 }
 
 /**
@@ -2024,12 +2026,17 @@ function stripCliches(text) {
 }
 
 /**
- * "Fix what the review found": weaves in the job's missing keywords (weaveSkills),
- * strengthens every point with the XYZ formula (improvePoints), and strips stock resume
- * phrases (stripCliches) — the rule-engine version of rewriting the CV against the
- * recruiter review in one pass, with no AI and nothing invented.
+ * "Fix what the review found": weaves in the job's missing keywords the profile already
+ * shows (weaveSkills), strengthens every point with the XYZ formula (improvePoints), and
+ * strips stock resume phrases (stripCliches) — no AI needed for any of that. A keyword the
+ * job asks for that the profile shows no evidence of anywhere isn't invented by the rule
+ * engine; it's instead handed to the AI model (which Gemini/Claude/local already apply the
+ * same way as every other request) as its own follow-up, so it gets a real decision rather
+ * than a rule-engine message that silently skips it.
+ * @param {string} [raw] the original request line, for the AI hand-off message
+ * @param {string[]} [unclear] gets the hand-off entry pushed to it, when there's one
  */
-function applyReviewFixes(cv, jdTerms, done) {
+function applyReviewFixes(cv, jdTerms, done, raw, unclear, richPending) {
   const n = improvePoints(cv, cv.experience);
   let clichesFixed = 0;
   for (const x of cv.experience) {
@@ -2045,6 +2052,14 @@ function applyReviewFixes(cv, jdTerms, done) {
   if (n) done.push(`Strengthened ${n} point${n > 1 ? 's' : ''}: a strong action verb, a measured result and the method used (marked as approximately; change them to your real numbers)`);
   if (clichesFixed) done.push(`Removed ${clichesFixed} generic phrase${clichesFixed > 1 ? 's' : ''} (e.g. "team player", "results-driven") — add what you actually did in its place`);
   if (!n && !clichesFixed) done.push('No duty-style bullets or generic phrases found to fix');
+  // Keywords the job asks for that aren't anywhere on the CV at all — not just unlisted,
+  // genuinely nothing to weave from (weaveSkills already handled anything the profile does
+  // show). "Your points already show the skills this job asks for" would be false here.
+  const stillMissing = jdTerms.filter(t => t.category !== 'Ways of Working' && t.name !== 'AI' && countMatches(t.re, JSON.stringify(cv)) === 0).map(t => t.name);
+  if (stillMissing.length && unclear && raw) {
+    unclear.push(`${raw} — weave in ${joinList(stillMissing.slice(0, 6))}, which this job asks for but nothing in the profile shows yet.`);
+    if (richPending) richPending[raw] = `Weave ${joinList(stillMissing.slice(0, 6))} into the experience section — add a real, specific bullet or a skill entry for each one, grounded in the kind of work already on this CV. These are required by the job description but don't appear anywhere on the CV yet.`;
+  }
 }
 
 // Certifications that fit the skills a job asks for (named in replies; added only by name)
@@ -2172,6 +2187,11 @@ export function validateWholeCvEdit(original, edited, requestText, unfiltered = 
 export function applyInstructions(input, text, { whole = false, job = null, unfiltered = false } = {}) {
   const cv = normalizeCV(input);
   const done = [], unclear = [], skills = [];
+  // When an unclear entry is actually a detailed instruction for the AI (not just an
+  // explanation for the human, like most unclear messages), the AI gets that detail
+  // instead of just the bare original line — e.g. "fix the red flags" alone doesn't tell
+  // the model which keywords it still needs to weave in, but the full message does.
+  const richPending = {};
   // the posting's skills, when the job is known (for "add more skills into my experience")
   const jdText = job ? `${job.title || ''}\n${job.description || ''}` : '';
   const jdTerms = jdText.trim() ? TERMS.filter(t => countMatches(t.re, jdText) > 0) : [];
@@ -2362,7 +2382,7 @@ export function applyInstructions(input, text, { whole = false, job = null, unfi
     // stripped — all in one pass, matching what the review above already found.
     if (/\b(?:red flags?|recruiter review|the review|ats\b.*review)\b/i.test(line)
       && /^(?:fix|address|resolve|apply|rewrite|update|clean up)\b/i.test(line)) {
-      applyReviewFixes(cv, jdTerms, done);
+      applyReviewFixes(cv, jdTerms, done, raw, unclear, richPending);
       continue;
     }
     // "Each bullet point should have 2 lines", "I want 2 lines per bullet point", "add
@@ -2618,14 +2638,17 @@ export function applyInstructions(input, text, { whole = false, job = null, unfi
     // of a dead end, since there's always something worth tightening.
     if (/^(?:make|help\s+make)\s+(?:(?:the|my|this)\s+)?(?:cv|resume|profile|it|this)\s+(?:more\s+|really\s+|much\s+)?[a-z][a-z\s-]*[a-z]\.?$/i.test(line)
       || /^(?:improve|polish|strengthen|enhance|boost|elevate|upgrade|optimi[sz]e|fix|rework|redo|refine|tune up)\s+(?:my\s+|the\s+)?(?:cv|resume|profile)(?:\s+overall)?\.?$/i.test(line)) {
-      applyReviewFixes(cv, jdTerms, done);
+      applyReviewFixes(cv, jdTerms, done, raw, unclear, richPending);
       continue;
     }
     unclear.push(`${raw} — I'm not sure what to change. Try describing exactly what you did (e.g. "led a team of 4 engineers"), or say what to add, remove or improve and where (e.g. "improve my Paywise points", "remove the point about billing").`);
   }
   // the lines themselves (without notes), for a smarter pass when Claude is set up
-  // format-agnostic: every unclear message starts with the original line it's about
-  const pending = lines.filter(l => unclear.some(u => u === l || u.startsWith(l)));
+  // format-agnostic: every unclear message starts with the original line it's about —
+  // except where richPending has a fuller, AI-specific version of the same request, which
+  // carries detail (e.g. exactly which keywords to weave in) that the bare original line
+  // doesn't say and the model has no other way to know.
+  const pending = lines.filter(l => unclear.some(u => u === l || u.startsWith(l))).map(l => richPending[l] || l);
   return { cv, done, unclear, skills, pending };
 }
 
