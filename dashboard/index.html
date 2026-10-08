@@ -14,6 +14,12 @@
 </head>
 <body data-builtin="true">
 
+  <!-- Stays visible regardless of scroll position while the CV is being tailored -->
+  <div class="global-loader" id="global-loader" hidden role="status" aria-live="polite">
+    <span class="global-loader-spinner"></span>
+    <span id="global-loader-text">Tailoring your CV…</span>
+  </div>
+
   <div class="shell">
 
     <!-- Sidebar (desktop) / bottom bar (mobile) -->

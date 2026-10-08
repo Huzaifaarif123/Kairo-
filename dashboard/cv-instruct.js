@@ -106,6 +106,7 @@ async function applyInstruct(button) {
   button.disabled = true;
   button.textContent = 'Working on it…';
   setInstructResult('<p class="instruct-wait">Working on it… requests in your own words can take up to a minute with the local AI.</p>');
+  showGlobalLoader('Applying your changes…');
   try {
     const res = await fetch(apiUrl('/api/cv/instruct'), {
       method: 'POST',
@@ -143,6 +144,7 @@ async function applyInstruct(button) {
     button.disabled = false;
     button.textContent = 'Apply to CV';
     updateInstructUndo();
+    hideGlobalLoader();
   }
 }
 

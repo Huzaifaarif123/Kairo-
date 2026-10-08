@@ -977,6 +977,34 @@ function showToast(message, duration = 2200) {
   toastTimer = setTimeout(() => toast.classList.remove('show'), duration);
 }
 
+// A fixed-position loader that stays on screen regardless of scroll position — used
+// while the CV is tailoring or an AI edit is in progress, since the triggering button's
+// own "working…" text is easy to miss once the page has scrolled away from it.
+let globalLoaderCount = 0;
+let globalLoaderShownAt = 0;
+// A request the rule engine resolves on its own (no AI call) can finish in under 150ms —
+// too fast to actually see appear and disappear, which reads as "nothing happened" rather
+// than "it was quick". Keeping it up for at least this long makes it a visible signal
+// every time, not just on the slow AI-backed requests.
+const GLOBAL_LOADER_MIN_MS = 400;
+function showGlobalLoader(text) {
+  globalLoaderCount++;
+  globalLoaderShownAt = Date.now();
+  const el = document.getElementById('global-loader');
+  if (!el) return;
+  document.getElementById('global-loader-text').textContent = text || 'Working…';
+  el.hidden = false;
+}
+function hideGlobalLoader() {
+  globalLoaderCount = Math.max(0, globalLoaderCount - 1);
+  if (globalLoaderCount > 0) return;
+  const el = document.getElementById('global-loader');
+  if (!el) return;
+  const elapsed = Date.now() - globalLoaderShownAt;
+  if (elapsed < GLOBAL_LOADER_MIN_MS) setTimeout(() => { if (!globalLoaderCount) el.hidden = true; }, GLOBAL_LOADER_MIN_MS - elapsed);
+  else el.hidden = true;
+}
+
 function copyText(elemId) {
   const elem = document.getElementById(elemId);
   if (!elem) return;

@@ -179,6 +179,7 @@ async function runTailor({ ai = true } = {}) {
 
   button.disabled = true;
   button.textContent = ai ? 'Tailoring… (this can take up to a minute)' : 'Updating…';
+  showGlobalLoader(ai ? 'Tailoring your CV…' : 'Updating your CV…');
   try {
     const res = await fetch(apiUrl('/api/tailor'), {
       method: 'POST',
@@ -196,6 +197,7 @@ async function runTailor({ ai = true } = {}) {
   } finally {
     button.disabled = false;
     button.textContent = 'Tailor my CV';
+    hideGlobalLoader();
   }
 }
 
