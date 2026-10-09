@@ -285,6 +285,7 @@ function switchTab(tabId) {
     renderCharts();
   }
   if (tabId === 'cv-editor') openCvEditor();
+  if (tabId === 'tailor' && typeof openTailorDraft === 'function') openTailorDraft();
 }
 
 // Load Application Tracker Data from API / LocalStorage

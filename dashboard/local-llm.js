@@ -97,8 +97,10 @@ async function askModel(cv, requests) {
  * allowed to replace `result.cv`. Changes `result` in place and returns it.
  * @param {boolean} [unfiltered] skips the honesty check when true — an explicit,
  * user-visible opt-in for an unverified draft, never the default.
+ * @param {string} [jdText] the job posting's text, so the honesty check can also catch
+ * the model copying it verbatim.
  */
-export async function applyWithLocalModel(result, unfiltered = false) {
+export async function applyWithLocalModel(result, unfiltered = false, jdText = '') {
   if (!result.pending.length) return result;
   const requestText = result.pending.join('\n');
   // The rule engine's own message for this request (if it had something specific to say,
@@ -124,7 +126,7 @@ export async function applyWithLocalModel(result, unfiltered = false) {
   if (touchedCv) out.cv = { ...result.cv, ...out.cv };
   if (!touchedCv) {
     result.pending = notDone.length ? notDone : [fallback('nothing to change.')];
-  } else if (validateWholeCvEdit(result.cv, out.cv, requestText, unfiltered)) {
+  } else if (validateWholeCvEdit(result.cv, out.cv, requestText, unfiltered, jdText)) {
     const normalized = normalizeCV(out.cv);
     // a small model can say "changes" that its own JSON doesn't actually contain — trust
     // the diff, not the model's description of itself. If nothing really changed, treat

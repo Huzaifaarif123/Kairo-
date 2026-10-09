@@ -32,11 +32,12 @@ export async function POST(req: Request) {
   // it the AI can invent technologies, numbers or employers that aren't on the real CV.
   const unfiltered = body.unfiltered === true;
 
+  const jdText = `${jobInput.title}\n${jobInput.description}`;
   const working = scope ? scopeCV(body.cv, scope) : body.cv;
   const result = applyInstructions(working, scope ? scopeText(text, scope, body.cv) : text, { job: jobInput, unfiltered });
   if (aiConfigured && result.pending.length) {
     try {
-      const edit = await editCvWithClaude(result.cv, result.pending, unfiltered);
+      const edit = await editCvWithClaude(result.cv, result.pending, unfiltered, jdText);
       if (edit) {
         // skills Claude added, so the page can mark them as matched against the job
         const skillName = (i: unknown) => (typeof i === 'string' ? i : (i as { name?: string }).name || '');
@@ -60,7 +61,7 @@ export async function POST(req: Request) {
     // clean, original request instead of its own "rate limit" message to chew on.
     const pendingBefore = [...result.pending];
     const unclearBefore = [...result.unclear];
-    cloud = await applyWithCloudModel(result, unfiltered);
+    cloud = await applyWithCloudModel(result, unfiltered, jdText);
     if (!cloud) { result.pending = pendingBefore; result.unclear = unclearBefore; }
   }
   // Cloud wasn't configured, or it was tried and genuinely failed (not just
@@ -68,7 +69,7 @@ export async function POST(req: Request) {
   let local = false;
   if (!aiConfigured && !cloud && result.pending.length && await localModelReady()) {
     local = true;
-    await applyWithLocalModel(result, unfiltered);
+    await applyWithLocalModel(result, unfiltered, jdText);
   }
   if (scope) result.cv = mergeScoped(body.cv, result.cv, scope);
   return Response.json({ ...result, ai: aiConfigured || cloud || local, unfiltered: unfiltered && (aiConfigured || cloud || local) });

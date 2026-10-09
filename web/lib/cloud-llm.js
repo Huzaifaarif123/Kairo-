@@ -127,6 +127,28 @@ export async function answerQuestions(cv, job, questions) {
   return out && typeof out.answers === 'object' && out.answers ? out.answers : {};
 }
 
+const STRIP_NUMBERS_PROMPT = `You rewrite resume bullets to remove specific numbers. You get a JSON array of strings. For each one, rewrite it to remove any specific number, percentage, count or quantity (e.g. "15,000+ documents a month" -> "a high volume of documents", "40% off response latency" -> "lower response latency") while keeping the actual action and method/tool named — never change what was done or how, only drop the figure. If a bullet has no number, return it completely unchanged. Reply with ONLY a JSON object: {"bullets": [<rewritten strings, same order, same count as given>]}.`;
+
+/**
+ * Rewrites bullets whose number a cheap regex pass couldn't safely strip out (the number
+ * sits mid-sentence as a direct object — "processed 15,000+ records" — not in a clean
+ * trailing clause a regex can lift off). One batched call for everything still left, so
+ * this stays a single extra request per tailor, not one per bullet. Falls back to the
+ * input unchanged (number and all) on any failure — never throws, never blocks the tailor.
+ */
+export async function stripBulletNumbers(bullets) {
+  if (!cloudAiConfigured || !bullets.length) return bullets;
+  try {
+    const out = await chatJSON(STRIP_NUMBERS_PROMPT, JSON.stringify(bullets), 20_000, 2000);
+    const stripped = Array.isArray(out && out.bullets) ? out.bullets.map(String) : null;
+    if (!stripped || stripped.length !== bullets.length) return bullets;
+    return stripped;
+  } catch (err) {
+    console.error('Number-stripping pass failed:', err.message);
+    return bullets;
+  }
+}
+
 /**
  * The cloud model's pass over requests the rules didn't understand. Changes `result`
  * in place like applyWithLocalModel, but — unlike it — returns whether the call
@@ -136,8 +158,10 @@ export async function answerQuestions(cv, job, questions) {
  * @param {boolean} [unfiltered] skips the honesty check when true — an explicit,
  * user-visible opt-in for an unverified draft, never the default (the model can
  * otherwise fabricate facts: invented technologies, numbers, even employers).
+ * @param {string} [jdText] the job posting's text, so the honesty check can also catch
+ * the model copying it verbatim.
  */
-export async function applyWithCloudModel(result, unfiltered = false) {
+export async function applyWithCloudModel(result, unfiltered = false, jdText = '') {
   if (!result.pending.length) return true;
   const requestText = result.pending.join('\n');
   const originalMessage = result.unclear.find(u => u.startsWith(requestText));
@@ -162,7 +186,7 @@ export async function applyWithCloudModel(result, unfiltered = false) {
   if (touchedCv) out.cv = { ...result.cv, ...out.cv };
   if (!touchedCv) {
     result.pending = notDone.length ? notDone : [fallback('nothing to change.')];
-  } else if (validateWholeCvEdit(result.cv, out.cv, requestText, unfiltered)) {
+  } else if (validateWholeCvEdit(result.cv, out.cv, requestText, unfiltered, jdText)) {
     const normalized = normalizeCV(out.cv);
     if (JSON.stringify(normalized) === JSON.stringify(normalizeCV(result.cv))) {
       result.pending = [fallback("I couldn't make that change.")];

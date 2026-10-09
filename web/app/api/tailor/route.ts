@@ -1,8 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { resolveProfile, getProfileMarkdown } from '@/lib/profiles';
-import { tailorCV, renderTailoredCV, saveTailoredCV } from '@/lib/tailor.js';
+import { tailorCV, renderTailoredCV, saveTailoredCV, hasMeasure } from '@/lib/tailor.js';
 import { rewriteWithClaude, rewriteWithCloud, aiConfigured } from '@/lib/ai-tailor';
-import { cloudAiConfigured } from '@/lib/cloud-llm.js';
+import { cloudAiConfigured, stripBulletNumbers } from '@/lib/cloud-llm.js';
 import { ROOT, usingDatabase } from '@/lib/store';
 
 export const dynamic = 'force-dynamic';
@@ -62,6 +62,17 @@ export async function POST(req: Request) {
       return Response.json({ error: oneOff
         ? 'Could not find a name and work experience in that CV. Check the uploaded file or paste the CV text instead.'
         : `The ${profile.label} profile is still empty. Fill in its name and experience first.` }, { status: 422 });
+    }
+    // A number the regex pass in tailorCV couldn't safely lift out (it sits mid-sentence as
+    // a direct object, not a clean trailing clause) still isn't shown by default — one
+    // batched AI call cleans up whatever's left, never blocking the tailor if it fails.
+    {
+      const flat = result.cv.experience.flatMap((x: { bullets: string[] }) => x.bullets.map((_: string, j: number) => [x, j] as const));
+      const toFix = flat.filter(([x, j]: readonly [{ bullets: string[] }, number]) => hasMeasure(x.bullets[j]));
+      if (toFix.length) {
+        const cleaned = await stripBulletNumbers(toFix.map(([x, j]: readonly [{ bullets: string[] }, number]) => x.bullets[j]));
+        toFix.forEach(([x, j]: readonly [{ bullets: string[] }, number], i: number) => { if (cleaned[i]) x.bullets[j] = cleaned[i]; });
+      }
     }
 
     // Claude rewrites the selected content; without it, a free-tier cloud model (Groq or

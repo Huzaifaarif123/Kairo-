@@ -289,6 +289,7 @@ function switchTab(tabId) {
     renderCharts();
   }
   if (tabId === 'cv-editor') openCvEditor();
+  if (tabId === 'tailor' && typeof openTailorDraft === 'function') openTailorDraft();
 }
 
 // Load Application Tracker Data from API / LocalStorage
@@ -1211,6 +1212,7 @@ async function runTailor({ ai = true } = {}) {
     if (!res.ok) throw new Error(data.error || 'Tailoring failed');
     tailorResult = data;
     renderTailorResult();
+    saveTailorDraft();
   } catch (err) {
     const timedOut = err.name === 'TimeoutError' || err.name === 'AbortError';
     showToast(timedOut ? 'Tailoring took too long and was cancelled — try again.' : (err.message || 'Could not reach the server'));
@@ -1379,6 +1381,97 @@ function copyTailoredText() {
     .catch(() => showToast('Copy failed'));
 }
 
+// ---------- Autosave / restore: a refresh (or closing the tab) should never lose a
+// tailored CV in progress. Mirrors the CV Editor's own draft (cveSaveDraft/cveReadDraft
+// in cv-editor.js), kept per profile on this device only.
+
+const tailorDraftKey = () => `kairo.tailorDraft.${typeof activeProfile !== 'undefined' ? activeProfile : 'default'}`;
+let tailorDraftTimer = null;
+let tailorDraftRestored = false;
+
+function saveTailorDraft() {
+  clearTimeout(tailorDraftTimer);
+  tailorDraftTimer = setTimeout(() => {
+    try {
+      if (!tailorResult) { localStorage.removeItem(tailorDraftKey()); return; }
+      localStorage.setItem(tailorDraftKey(), JSON.stringify({
+        title: document.getElementById('tailor-title').value,
+        company: document.getElementById('tailor-company').value,
+        description: document.getElementById('tailor-desc').value,
+        source: tailorSource,
+        result: tailorResult,
+        cv: tailorWs.cv,
+        styles: tailorWs.styles,
+        layout: tailorWs.layout,
+        edited: tailorWs.edited,
+        confirmed: [...tailorConfirmed],
+        jobKey: tailorJobKey,
+        instructUndo,
+        instructBaseSummary,
+        instructText: (document.getElementById('tailor-instruct') || {}).value || '',
+        savedAt: new Date().toISOString()
+      }));
+      const note = document.getElementById('tailor-draft-note');
+      if (note) note.textContent = `Saved on this device at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`;
+    } catch (e) { /* storage full or blocked: tailoring still works, just not saved */ }
+  }, 400);
+}
+
+function readTailorDraft() {
+  try { return JSON.parse(localStorage.getItem(tailorDraftKey()) || 'null'); } catch (e) { return null; }
+}
+
+function clearTailorDraft() {
+  tailorDraftRestored = false;
+  try { localStorage.removeItem(tailorDraftKey()); } catch (e) {}
+}
+
+// Restores a tailored CV left mid-work after a refresh. Runs once per profile per page
+// load, the first time the Tailor tab is opened (mirrors openCvEditor's lazy restore).
+function openTailorDraft() {
+  if (tailorDraftRestored || tailorResult) return;
+  tailorDraftRestored = true;
+  const draft = readTailorDraft();
+  if (!draft || !draft.result || !draft.result.cv) return;
+  document.getElementById('tailor-title').value = draft.title || '';
+  document.getElementById('tailor-company').value = draft.company || '';
+  document.getElementById('tailor-desc').value = draft.description || '';
+  if (draft.source && draft.source.kind === 'other') {
+    tailorSource = draft.source;
+    document.querySelectorAll('.cv-source .seg-btn').forEach(b => {
+      const on = b.dataset.src === 'other';
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-checked', on);
+    });
+    document.getElementById('cv-source-other').hidden = false;
+    document.getElementById('tailor-cv-status').innerHTML =
+      `Using <strong>${escapeHtml(draft.source.name)}</strong>'s CV (from ${escapeHtml(draft.source.label)}), restored from this device. Not saved to any profile.`;
+  }
+  tailorConfirmed.clear();
+  (draft.confirmed || []).forEach(s => tailorConfirmed.add(s));
+  tailorJobKey = draft.jobKey || '';
+  tailorResult = draft.result;
+  renderTailorResult();
+  // Edits made after tailoring (Edit CV, the style bar, an instruction) are layered back
+  // on top of the restored base result, which renderTailorResult() just reset to default
+  if (draft.cv && draft.edited) {
+    tailorWs.cv = draft.cv;
+    tailorWs.styles = draft.styles || tailorWs.styles;
+    tailorWs.layout = draft.layout || tailorWs.layout;
+    tailorWs.edited = true;
+    renderStyleBar(tailorWs);
+    if (!document.getElementById('tailor-edit-card').hidden) renderEditor(tailorWs);
+    cveRender(tailorWs, 0);
+  }
+  instructUndo = draft.instructUndo || [];
+  instructBaseSummary = draft.instructBaseSummary || '';
+  initInstructUnfiltered();
+  const box = document.getElementById('tailor-instruct');
+  if (box) box.value = draft.instructText || '';
+  updateInstructUndo();
+  showToast('Restored your in-progress tailored CV from this device.', 4000);
+}
+
 
 // CV editing and styling (ported from the CV adjustment kit's InlineEditor, the section
 // editors and PreviewToolbar). Used in two places:
@@ -1432,6 +1525,7 @@ const tailorWs = cveWorkspace({
     if (typeof renderTailorReview === 'function') renderTailorReview();
     if (typeof instructSync === 'function') instructSync();
     renderTailorPreview();
+    if (typeof saveTailorDraft === 'function') saveTailorDraft();
   }
 });
 
@@ -2142,6 +2236,7 @@ async function applyInstruct(button) {
       + summaryNote + questions.map(q => `<div class="instruct-answer"><strong>${escapeHtml(q)}</strong><p>${answerInstructQuestion(q)}</p></div>`).join('')
       + (data.done.length ? `<ul class="instruct-done">${data.done.map(d => `<li>${escapeHtml(d)}</li>`).join('')}</ul>` : '')
       + (data.unclear.length ? `<div class="instruct-unclear"><strong>Not changed</strong> (left in the box):<ul>${data.unclear.map(u => `<li>${escapeHtml(u)}</li>`).join('')}</ul>${data.ai ? 'Try describing it a different way — say exactly what you did, or name the job or section.' : 'Try one of the examples below. For anything else, I need an AI key added (Anthropic, Groq or OpenRouter), or the local AI (Ollama) running.'}</div>` : ''));
+    if (typeof saveTailorDraft === 'function') saveTailorDraft();
   } catch (err) {
     const timedOut = err.name === 'TimeoutError' || err.name === 'AbortError';
     showToast(timedOut ? 'That took too long and was cancelled — try again, or describe it more simply.' : (err.message || 'Could not reach the server'));
@@ -2161,6 +2256,7 @@ function undoInstruct() {
   cveRender(tailorWs, 0);
   setInstructResult('<ul class="instruct-done"><li>Undid the last change.</li></ul>');
   updateInstructUndo();
+  if (typeof saveTailorDraft === 'function') saveTailorDraft();
 }
 
 // A skill added by instruction moves from "Not in your profile" to "Covered"
@@ -2240,7 +2336,10 @@ const INSTRUCT_ACTION = /\b(?:add|remove|delete|change|make|put|set|update|repla
 function isInstructQuestion(line) {
   if (/^(?:what|which|how|why|where|who|tell me|show me|explain)\b/i.test(line)) return true;
   if (/^(?:can|could|would|will)\s+(?:you|u)\b|^(?:please|pls|kindly)\b/i.test(line)) return !INSTRUCT_ACTION.test(line) && /\?\s*$/.test(line);
-  if (/^(?:is|am|are|do|does|did|should|can|could)\b/i.test(line)) return true;
+  // "Do not show X", "Don't add Y", "Should not include Z": a negated opener is an
+  // instruction ("stop doing/never do this"), not a question — "do/does/did/should" only
+  // reads as a question when NOT immediately followed by a negation.
+  if (/^(?:is|am|are|do|does|did|should|can|could)\b/i.test(line) && !/^(?:is|am|are|do|does|did|should|can|could)\s*n'?t\b|^(?:is|am|are|do|does|did|should|can|could)\s+not\b/i.test(line)) return true;
   // "Rate/score/grade/evaluate my CV's ATS score": asking for an assessment, not an edit —
   // phrased as an imperative (no "?", not a what/how/can opener), but still a question
   if (/^(?:rate|score|grade|evaluate|assess|review|analy[sz]e|check)\b/i.test(line) && /\b(?:cv|resume|profile|summary|ats|score|rating|match)\b/i.test(line)) return true;
@@ -2649,6 +2748,7 @@ function resetTailor() {
   document.getElementById('tailor-analysis').hidden = true;
   document.getElementById('tailor-preview').hidden = true;
   document.getElementById('tailor-empty').hidden = false;
+  if (typeof clearTailorDraft === 'function') clearTailorDraft();
 }
 
 // ---------- Editor ----------

@@ -191,6 +191,7 @@ async function runTailor({ ai = true } = {}) {
     if (!res.ok) throw new Error(data.error || 'Tailoring failed');
     tailorResult = data;
     renderTailorResult();
+    saveTailorDraft();
   } catch (err) {
     const timedOut = err.name === 'TimeoutError' || err.name === 'AbortError';
     showToast(timedOut ? 'Tailoring took too long and was cancelled — try again.' : (err.message || 'Could not reach the server'));
@@ -357,4 +358,95 @@ function copyTailoredText() {
   navigator.clipboard.writeText(tailorResult.text)
     .then(() => showToast('CV copied as plain text'))
     .catch(() => showToast('Copy failed'));
+}
+
+// ---------- Autosave / restore: a refresh (or closing the tab) should never lose a
+// tailored CV in progress. Mirrors the CV Editor's own draft (cveSaveDraft/cveReadDraft
+// in cv-editor.js), kept per profile on this device only.
+
+const tailorDraftKey = () => `kairo.tailorDraft.${typeof activeProfile !== 'undefined' ? activeProfile : 'default'}`;
+let tailorDraftTimer = null;
+let tailorDraftRestored = false;
+
+function saveTailorDraft() {
+  clearTimeout(tailorDraftTimer);
+  tailorDraftTimer = setTimeout(() => {
+    try {
+      if (!tailorResult) { localStorage.removeItem(tailorDraftKey()); return; }
+      localStorage.setItem(tailorDraftKey(), JSON.stringify({
+        title: document.getElementById('tailor-title').value,
+        company: document.getElementById('tailor-company').value,
+        description: document.getElementById('tailor-desc').value,
+        source: tailorSource,
+        result: tailorResult,
+        cv: tailorWs.cv,
+        styles: tailorWs.styles,
+        layout: tailorWs.layout,
+        edited: tailorWs.edited,
+        confirmed: [...tailorConfirmed],
+        jobKey: tailorJobKey,
+        instructUndo,
+        instructBaseSummary,
+        instructText: (document.getElementById('tailor-instruct') || {}).value || '',
+        savedAt: new Date().toISOString()
+      }));
+      const note = document.getElementById('tailor-draft-note');
+      if (note) note.textContent = `Saved on this device at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`;
+    } catch (e) { /* storage full or blocked: tailoring still works, just not saved */ }
+  }, 400);
+}
+
+function readTailorDraft() {
+  try { return JSON.parse(localStorage.getItem(tailorDraftKey()) || 'null'); } catch (e) { return null; }
+}
+
+function clearTailorDraft() {
+  tailorDraftRestored = false;
+  try { localStorage.removeItem(tailorDraftKey()); } catch (e) {}
+}
+
+// Restores a tailored CV left mid-work after a refresh. Runs once per profile per page
+// load, the first time the Tailor tab is opened (mirrors openCvEditor's lazy restore).
+function openTailorDraft() {
+  if (tailorDraftRestored || tailorResult) return;
+  tailorDraftRestored = true;
+  const draft = readTailorDraft();
+  if (!draft || !draft.result || !draft.result.cv) return;
+  document.getElementById('tailor-title').value = draft.title || '';
+  document.getElementById('tailor-company').value = draft.company || '';
+  document.getElementById('tailor-desc').value = draft.description || '';
+  if (draft.source && draft.source.kind === 'other') {
+    tailorSource = draft.source;
+    document.querySelectorAll('.cv-source .seg-btn').forEach(b => {
+      const on = b.dataset.src === 'other';
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-checked', on);
+    });
+    document.getElementById('cv-source-other').hidden = false;
+    document.getElementById('tailor-cv-status').innerHTML =
+      `Using <strong>${escapeHtml(draft.source.name)}</strong>'s CV (from ${escapeHtml(draft.source.label)}), restored from this device. Not saved to any profile.`;
+  }
+  tailorConfirmed.clear();
+  (draft.confirmed || []).forEach(s => tailorConfirmed.add(s));
+  tailorJobKey = draft.jobKey || '';
+  tailorResult = draft.result;
+  renderTailorResult();
+  // Edits made after tailoring (Edit CV, the style bar, an instruction) are layered back
+  // on top of the restored base result, which renderTailorResult() just reset to default
+  if (draft.cv && draft.edited) {
+    tailorWs.cv = draft.cv;
+    tailorWs.styles = draft.styles || tailorWs.styles;
+    tailorWs.layout = draft.layout || tailorWs.layout;
+    tailorWs.edited = true;
+    renderStyleBar(tailorWs);
+    if (!document.getElementById('tailor-edit-card').hidden) renderEditor(tailorWs);
+    cveRender(tailorWs, 0);
+  }
+  instructUndo = draft.instructUndo || [];
+  instructBaseSummary = draft.instructBaseSummary || '';
+  initInstructUnfiltered();
+  const box = document.getElementById('tailor-instruct');
+  if (box) box.value = draft.instructText || '';
+  updateInstructUndo();
+  showToast('Restored your in-progress tailored CV from this device.', 4000);
 }

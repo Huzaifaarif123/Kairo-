@@ -134,6 +134,7 @@ async function applyInstruct(button) {
       + summaryNote + questions.map(q => `<div class="instruct-answer"><strong>${escapeHtml(q)}</strong><p>${answerInstructQuestion(q)}</p></div>`).join('')
       + (data.done.length ? `<ul class="instruct-done">${data.done.map(d => `<li>${escapeHtml(d)}</li>`).join('')}</ul>` : '')
       + (data.unclear.length ? `<div class="instruct-unclear"><strong>Not changed</strong> (left in the box):<ul>${data.unclear.map(u => `<li>${escapeHtml(u)}</li>`).join('')}</ul>${data.ai ? 'Try describing it a different way — say exactly what you did, or name the job or section.' : 'Try one of the examples below. For anything else, I need an AI key added (Anthropic, Groq or OpenRouter), or the local AI (Ollama) running.'}</div>` : ''));
+    if (typeof saveTailorDraft === 'function') saveTailorDraft();
   } catch (err) {
     const timedOut = err.name === 'TimeoutError' || err.name === 'AbortError';
     showToast(timedOut ? 'That took too long and was cancelled — try again, or describe it more simply.' : (err.message || 'Could not reach the server'));
@@ -153,6 +154,7 @@ function undoInstruct() {
   cveRender(tailorWs, 0);
   setInstructResult('<ul class="instruct-done"><li>Undid the last change.</li></ul>');
   updateInstructUndo();
+  if (typeof saveTailorDraft === 'function') saveTailorDraft();
 }
 
 // A skill added by instruction moves from "Not in your profile" to "Covered"
@@ -232,7 +234,10 @@ const INSTRUCT_ACTION = /\b(?:add|remove|delete|change|make|put|set|update|repla
 function isInstructQuestion(line) {
   if (/^(?:what|which|how|why|where|who|tell me|show me|explain)\b/i.test(line)) return true;
   if (/^(?:can|could|would|will)\s+(?:you|u)\b|^(?:please|pls|kindly)\b/i.test(line)) return !INSTRUCT_ACTION.test(line) && /\?\s*$/.test(line);
-  if (/^(?:is|am|are|do|does|did|should|can|could)\b/i.test(line)) return true;
+  // "Do not show X", "Don't add Y", "Should not include Z": a negated opener is an
+  // instruction ("stop doing/never do this"), not a question — "do/does/did/should" only
+  // reads as a question when NOT immediately followed by a negation.
+  if (/^(?:is|am|are|do|does|did|should|can|could)\b/i.test(line) && !/^(?:is|am|are|do|does|did|should|can|could)\s*n'?t\b|^(?:is|am|are|do|does|did|should|can|could)\s+not\b/i.test(line)) return true;
   // "Rate/score/grade/evaluate my CV's ATS score": asking for an assessment, not an edit —
   // phrased as an imperative (no "?", not a what/how/can opener), but still a question
   if (/^(?:rate|score|grade|evaluate|assess|review|analy[sz]e|check)\b/i.test(line) && /\b(?:cv|resume|profile|summary|ats|score|rating|match)\b/i.test(line)) return true;

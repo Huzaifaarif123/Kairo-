@@ -15,7 +15,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
-import { parseProfile, stripComments, validateWholeCvEdit, hasCliche } from './tailor.js';
+import { parseProfile, stripComments, validateWholeCvEdit, hasCliche, copiesJdText } from './tailor.js';
 import { cloudAiConfigured, chatJSON } from './cloud-llm.js';
 
 export const AI_MODEL = 'claude-sonnet-5-5';
@@ -60,9 +60,9 @@ Writing rules:
   1. "<Headline> with <N>+ years of experience building and deploying production <kind of systems>."
   2. "Strong expertise across <the posting's key skills the candidate has, grouped by where they are used, e.g. "React and Next.js on the frontend; Python and Django on the backend; and AWS and Docker for cloud delivery">." Never a bare keyword list."
   3. "Experienced across the full <AI product / data / delivery> lifecycle, including <stages the profile shows and the posting asks for>."
-  4. One sentence of proven results taken from the profile's own numbers.
+  4. One sentence naming the scope or kind of impact of the work (e.g. systems shipped, teams or products supported) — in plain terms, without citing a specific number or percentage.
 - Skills: use only these category labels, in this order, and only the ones that have relevant skills: Languages; Machine Learning; Generative AI and LLMs; AI Agents and Orchestration; RAG and Retrieval; LLM Training and Fine Tuning; Inference and Model Serving; MLOps and Evaluation; Backend and APIs; Frontend; Data Engineering; Cloud and Infrastructure; Monitoring and Observability; Testing; Databases; Design; Other Tools. Put the posting's required skills the candidate has first in each category. Leave out skills irrelevant to this posting and soft skills.
-- Bullets: rewrite the candidate's own bullets for each role, most relevant to the posting first. Follow Google's XYZ formula: "Accomplished [X] as measured by [Y], by doing [Z]": the outcome (X), the profile's own number for it (Y) and the tools or method used (Z). Start with a strong past-tense verb (present tense for a current role is fine); never start with "Responsible for", "Worked on", "Helped" or "Involved in". Work the posting's keywords in naturally where the profile supports them. When the profile states no number for a bullet, keep X and Z and do not make one up. At most 30 words each. Every role gets at least 5 bullets when the profile has that many facts for it (most recent role up to 8; next 7; then 6). When a role has fewer facts, split bullets that hold two achievements, but never pad with invented ones. No stock phrases ("team player", "results-driven", "detail-oriented", "hardworking", "self-starter", "proven track record", "passionate about" and the like) in any bullet — such content is rejected automatically.
+- Bullets: rewrite the candidate's own bullets for each role, most relevant to the posting first. State the outcome (X) and the tool or method used (Z) — what was done and how. Do NOT include a specific number, percentage or quantified metric in a bullet by default, even where the profile states one for that work — name the action and the method only, unless the request you were given explicitly asks you to include the candidate's real achievement figures (if it does, use only the profile's own number, exactly as stated, never invented or rounded). Start with a strong past-tense verb (present tense for a current role is fine); never start with "Responsible for", "Worked on", "Helped" or "Involved in". Work the posting's keywords in naturally where the profile supports them. At most 30 words each. Write as many bullets per role as the profile has real, distinct facts for (most recent role up to 8; next 7; then 6) — never pad a role with invented or generic bullets to reach a count; a role with little material should have fewer bullets, not inflated ones. When a role has fewer facts, split bullets that hold two achievements, but never pad with invented ones. No stock phrases ("team player", "results-driven", "detail-oriented", "hardworking", "self-starter", "proven track record", "passionate about" and the like) in any bullet — such content is rejected automatically.
 - The candidate's projects and education are kept exactly as the profile states them; do not add sections or content beyond what is asked for here.
 - Tailor the content, don't stuff keywords: make each bullet answer something the posting asks for, using the profile's own facts. Use the posting's wording only where the profile shows that skill, and never add a skill to a bullet that the profile doesn't tie to that work.
 - Design the CV around what the posting asks for, but it must never read like a copy of the posting: never reuse the posting's own sentence structure, phrasing or ordering of requirements. The result should read as this specific candidate's own experience, shaped toward this role — not a restatement of the job description with their name on it.
@@ -187,8 +187,11 @@ type Cv = {
  * explicit, user-visible opt-in for an unverified draft, never the default. Skill-source
  * and blocked-skill checks still apply, since those reflect the candidate's own stated
  * preferences rather than fabrication detection.
+ * @param jdText the job posting's text, when known — enables the near-verbatim-copying
+ * check (always on; not part of the fabrication checks `unfiltered` skips, since copying
+ * the posting isn't a fabricated fact, it's a quality/originality problem).
  */
-export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, allowedSkills: string[], blockedSkills: string[], unfiltered = false) {
+export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, allowedSkills: string[], blockedSkills: string[], unfiltered = false, jdText = '') {
   const profileText = norm(stripComments(profileMd));
   const profileNumbers = new Set(numbersIn(stripComments(profileMd)));
   const allowed = new Set(allowedSkills.map(norm));
@@ -196,9 +199,15 @@ export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, allo
   const blocked = blockedSkills.map(norm).filter(b => b.length >= 3);
   let rejected = 0;
 
-  // unfiltered skips only the fact-check (numbersOk) — quality (no clichés) always applies
-  const numbersOk = (text: string) => unfiltered || numbersIn(text).every(n => profileNumbers.has(n) || Number(n) < 10);
+  // unfiltered skips only the fact-check (numbersOk) — quality (no clichés, no JD copying)
+  // always applies. No small-number carve-out anymore: the prompt now tells the model not
+  // to include metrics in bullets by default at all, so the backstop matches — a number is
+  // only allowed if it's already in the CV (profile-wide for the summary/tagline, since
+  // those aren't tied to one role; that exact role's own original bullets for experience,
+  // tighter below, so a real number from one job can't get attached to a different one).
+  const numbersOk = (text: string, allowed: Set<string> = profileNumbers) => unfiltered || numbersIn(text).every(n => allowed.has(n));
   const noCliche = (text: string) => !hasCliche(text);
+  const notCopied = (text: string) => !jdText || !copiesJdText(text, jdText);
   const mentionsBlocked = (text: string) => blocked.some(b => new RegExp(`(?<![a-z0-9])${b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`).test(norm(text)));
   const skillOk = (item: string) => {
     const n = norm(item.replace(/\s*\(.*?\)\s*/g, ' '));
@@ -215,7 +224,7 @@ export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, allo
   else rejected++;
 
   const summary = rewrite.summary.trim();
-  if (summary && words(summary) <= MAX_SUMMARY_WORDS && numbersOk(summary) && !mentionsBlocked(summary) && noCliche(summary)) out.summary = summary;
+  if (summary && words(summary) <= MAX_SUMMARY_WORDS && numbersOk(summary) && !mentionsBlocked(summary) && noCliche(summary) && notCopied(summary)) out.summary = summary;
   else rejected++;
 
   const skills = rewrite.skills
@@ -227,9 +236,14 @@ export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, allo
   out.experience = base.experience.map((job, i) => {
     const limit = BULLETS_PER_ROLE[i] ?? 2;
     const fromClaude = rewrite.experience.find(e => e.index === i)?.bullets || [];
+    const roleNumbers = new Set(numbersIn(job.bullets.join(' ')));
+    const seen = new Set<string>();
     const good = fromClaude
       .map(b => b.trim().replace(/^[-•*]\s*/, ''))
-      .filter(b => b && words(b) <= MAX_BULLET_WORDS && numbersOk(b) && !mentionsBlocked(b) && noCliche(b));
+      .filter(b => b && words(b) <= MAX_BULLET_WORDS && numbersOk(b, roleNumbers) && !mentionsBlocked(b) && noCliche(b) && notCopied(b))
+      // de-duplicate: a model occasionally repeats the same bullet (verbatim or
+      // near-identical) within one role
+      .filter(b => { const n = norm(b); if (seen.has(n)) return false; seen.add(n); return true; });
     rejected += fromClaude.length - good.length;
     return { ...job, bullets: (good.length ? good : job.bullets).slice(0, limit) };
   });
@@ -254,7 +268,7 @@ export async function rewriteWithClaude(args: {
   const { covered, implied, missing, allowedSkills } = prepRewriteArgs({ base, profileMd, confirmed });
 
   const rewrite = await requestRewrite({ profileMd, title, company, description, confirmed, covered, implied, missing });
-  const { cv, rejected } = mergeRewrite(base.cv, rewrite, profileMd, allowedSkills, missing);
+  const { cv, rejected } = mergeRewrite(base.cv, rewrite, profileMd, allowedSkills, missing, false, `${title}\n${description}`);
   return { cv, notes: rewrite.notes.slice(0, 6), rejected, model: AI_MODEL };
 }
 
@@ -292,7 +306,7 @@ export async function rewriteWithCloud(args: {
     experience: Array.isArray(raw.experience) ? raw.experience.map((e: { index?: unknown; bullets?: unknown[] }) => ({ index: Number(e.index) || 0, bullets: Array.isArray(e.bullets) ? e.bullets.map(String) : [] })) : [],
     notes: Array.isArray(raw.notes) ? raw.notes.map(String) : []
   };
-  const { cv, rejected } = mergeRewrite(base.cv, rewrite, profileMd, allowedSkills, missing);
+  const { cv, rejected } = mergeRewrite(base.cv, rewrite, profileMd, allowedSkills, missing, false, `${title}\n${description}`);
   return { cv, notes: rewrite.notes.slice(0, 6), rejected, model: 'cloud' };
 }
 
@@ -339,7 +353,7 @@ type EditableCv = z.infer<typeof EditSchema>['cv'];
  * when the caller explicitly asked for an unverified draft (an explicit, user-visible
  * toggle, never the default), since without it the model can fabricate facts.
  */
-export async function editCvWithClaude(cv: EditableCv & Record<string, unknown>, requests: string[], unfiltered = false) {
+export async function editCvWithClaude(cv: EditableCv & Record<string, unknown>, requests: string[], unfiltered = false, jdText = '') {
   const response = await getClient().beta.messages.parse({
     model: AI_MODEL,
     max_tokens: 16000,
@@ -352,8 +366,8 @@ export async function editCvWithClaude(cv: EditableCv & Record<string, unknown>,
   const out = response.parsed_output;
   if (!out || response.stop_reason === 'refusal') return null;
   // Same honesty check as the local-model path: no new employer, school, certification
-  // or unmarked number that wasn't in the CV or the request.
-  if (!validateWholeCvEdit(cv, out.cv, requests.join('\n'), unfiltered)) return null;
+  // or unmarked number that wasn't in the CV or the request, and no verbatim JD copying.
+  if (!validateWholeCvEdit(cv, out.cv, requests.join('\n'), unfiltered, jdText)) return null;
   return { cv: { ...cv, ...out.cv, projects: out.cv.projects.map(p => ({ ...p, desc: p.bullets.join(' ') })) }, changes: out.changes, notDone: out.notDone };
 }
 

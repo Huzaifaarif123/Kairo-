@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { tailorCV, saveTailoredCV, renderTailoredCV, profileToCV, applyInstructions, scopeCV, scopeText, mergeScoped } from './tailor.js';
+import { tailorCV, saveTailoredCV, renderTailoredCV, profileToCV, applyInstructions, scopeCV, scopeText, mergeScoped, hasMeasure } from './tailor.js';
 import { applyWithLocalModel, localModelReady } from './local-llm.js';
-import { cloudAiConfigured, applyWithCloudModel, answerQuestions } from './cloud-llm.js';
+import { cloudAiConfigured, applyWithCloudModel, answerQuestions, stripBulletNumbers } from './cloud-llm.js';
 import { compileLatexWithRetry, LatexCompileError } from './latex-compile.js';
 import { resolveProfile, listProfiles, profileDetails, usesOriginalOwner, readProfileMarkdown, writeProfileMarkdown, evaluateAgainstProfile } from './profiles.js';
 
@@ -287,16 +287,18 @@ const server = http.createServer(async (req, res) => {
         // (an explicit, user-visible toggle) asks for an unverified draft. Never the
         // default: without it the AI can invent technologies, numbers or employers.
         const unfiltered = data.unfiltered === true;
-        const result = applyInstructions(sc ? scopeCV(data.cv, sc) : data.cv, sc ? scopeText(text, sc, data.cv) : text, { job: { title: String(job.title || '').slice(0, 200), description: String(job.description || '').slice(0, 30000) }, unfiltered });
+        const jobInput = { title: String(job.title || '').slice(0, 200), description: String(job.description || '').slice(0, 30000) };
+        const jdText = `${jobInput.title}\n${jobInput.description}`;
+        const result = applyInstructions(sc ? scopeCV(data.cv, sc) : data.cv, sc ? scopeText(text, sc, data.cv) : text, { job: jobInput, unfiltered });
         let cloud = false;
         if (result.pending.length > 0 && cloudAiConfigured) {
           const pendingBefore = [...result.pending];
           const unclearBefore = [...result.unclear];
-          cloud = await applyWithCloudModel(result, unfiltered);
+          cloud = await applyWithCloudModel(result, unfiltered, jdText);
           if (!cloud) { result.pending = pendingBefore; result.unclear = unclearBefore; }
         }
         const local = !cloud && result.pending.length > 0 && await localModelReady();
-        if (local) await applyWithLocalModel(result, unfiltered);
+        if (local) await applyWithLocalModel(result, unfiltered, jdText);
         if (sc) result.cv = mergeScoped(data.cv, result.cv, sc);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ...result, ai: cloud || local, unfiltered: unfiltered && (cloud || local) }));
@@ -349,7 +351,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/tailor' && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
-    req.on('end', () => {
+    req.on('end', async () => {
       try {
         const { title = '', company = '', description = '', save = false, confirmedSkills = [], latex, filename, template = '', styles = {}, profileMarkdown } = JSON.parse(body || '{}');
         // "Save to cv/": the exact CV on screen
@@ -383,6 +385,17 @@ const server = http.createServer(async (req, res) => {
           res.writeHead(422, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: `The ${profile.label} profile is still empty. Fill in its name and experience first.` }));
           return;
+        }
+        // A number the regex pass in tailorCV couldn't safely lift out (it sits mid-sentence
+        // as a direct object, not a clean trailing clause) still isn't shown by default — one
+        // batched AI call cleans up whatever's left, never blocking the tailor if it fails.
+        {
+          const flat = result.cv.experience.flatMap(x => x.bullets.map((_, j) => [x, j]));
+          const toFix = flat.filter(([x, j]) => hasMeasure(x.bullets[j]));
+          if (toFix.length) {
+            const cleaned = await stripBulletNumbers(toFix.map(([x, j]) => x.bullets[j]));
+            toFix.forEach(([x, j], i) => { if (cleaned[i]) x.bullets[j] = cleaned[i]; });
+          }
         }
         if (save) result.savedTo = saveTailoredCV(result, ROOT_DIR);
         res.writeHead(200, { 'Content-Type': 'application/json' });

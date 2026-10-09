@@ -355,11 +355,11 @@ Requirements:
               <div class="form-row">
                 <div class="field">
                   <label for="tailor-title">Job title</label>
-                  <input type="text" id="tailor-title" class="input" placeholder="e.g. AI Full Stack Engineer">
+                  <input type="text" id="tailor-title" class="input" placeholder="e.g. AI Full Stack Engineer" oninput="if (typeof saveTailorDraft === 'function') saveTailorDraft();">
                 </div>
                 <div class="field">
                   <label for="tailor-company">Company</label>
-                  <input type="text" id="tailor-company" class="input" placeholder="e.g. Acme AI">
+                  <input type="text" id="tailor-company" class="input" placeholder="e.g. Acme AI" oninput="if (typeof saveTailorDraft === 'function') saveTailorDraft();">
                 </div>
               </div>
               <div class="field">
@@ -368,7 +368,7 @@ Requirements:
                   <input type="file" id="tailor-jd-file" accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" hidden onchange="handleTailorJdFile(this)">
                   <button type="button" class="btn-link" onclick="document.getElementById('tailor-jd-file').click()">Upload JD (PDF, Word or text)</button>
                 </div>
-                <textarea id="tailor-desc" class="input" placeholder="Paste the full job description, including requirements…"></textarea>
+                <textarea id="tailor-desc" class="input" placeholder="Paste the full job description, including requirements…" oninput="if (typeof saveTailorDraft === 'function') saveTailorDraft();"></textarea>
               </div>
               <button class="btn btn-primary btn-block" id="tailor-run" onclick="runTailor()">Tailor my CV</button>
               <p class="tailor-note">
@@ -455,11 +455,12 @@ Requirements:
               <div class="card instruct-card" id="tailor-instruct-card">
                 <h2 class="card-title">Tell it what to add or change</h2>
                 <label class="instruct-label" for="tailor-instruct">Write what you want and press Enter (Shift+Enter for a new line)</label>
-                <textarea id="tailor-instruct" class="input instruct-box" rows="4" maxlength="4000" onkeydown="instructKey(event)" placeholder="Under Brightloop add: built GraphQL APIs serving 2M requests a day&#10;Add skills: Kubernetes, Terraform&#10;Remove PHP"></textarea>
+                <textarea id="tailor-instruct" class="input instruct-box" rows="4" maxlength="4000" onkeydown="instructKey(event)" oninput="if (typeof saveTailorDraft === 'function') saveTailorDraft();" placeholder="Under Brightloop add: built GraphQL APIs serving 2M requests a day&#10;Add skills: Kubernetes, Terraform&#10;Remove PHP"></textarea>
                 <div class="instruct-actions">
                   <button class="btn btn-primary" id="tailor-instruct-apply" onclick="applyInstruct(this)">Apply to CV</button>
                   <button class="btn btn-secondary" id="tailor-instruct-undo" onclick="undoInstruct()" disabled>Undo last change</button>
                 </div>
+                <p class="tailor-draft-note muted" id="tailor-draft-note"></p>
                 <label class="instruct-unfiltered-toggle">
                   <input type="checkbox" id="tailor-instruct-unfiltered">
                   Skip fact-check (AI output won't be checked for invented details — review before using)

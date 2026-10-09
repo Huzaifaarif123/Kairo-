@@ -880,14 +880,10 @@ export function tailorCV({ title = '', company = '', description = '', confirmed
   if (reordered) changes.push(`Reordered bullets in ${reordered} role${reordered > 1 ? 's' : ''} so the most relevant achievements come first`);
   if (dropped) changes.push(`Trimmed ${dropped} less relevant bullet${dropped > 1 ? 's' : ''} to keep the CV focused`);
   if (split) changes.push(`Split ${split === 1 ? 'a long point' : `${split} long points`} that each held two achievements into separate points`);
-  // Jobs still under five: standard points for that kind of role (listed so they can be checked)
-  const cvSkills = profile.skills.flatMap(g => g.items).filter(n => TERMS.some(t => t.name.toLowerCase() === String(n).toLowerCase()));
-  for (const x of experience) {
-    const add = standardPoints({ role: x.role, bullets: x.bullets.map(b => b.text) }, cvSkills, pointsPerJob(experience.length) - x.bullets.length);
-    if (!add.length) continue;
-    x.bullets.push(...add.map(text => ({ text, idx: -1, score: 0, rank: 0, measured: false })));
-    changes.push(`Added ${add.length} standard point${add.length > 1 ? 's' : ''} to ${x.company || x.role} so it has ${x.bullets.length} (typical work for this role; check ${add.length > 1 ? 'they match' : 'it matches'} what you did): ${add.map(a => `"${a}"`).join(' ')}`);
-  }
+  // Jobs with fewer real points than the usual target are left as-is rather than padded
+  // with generic "typical work for this role" bullets — those aren't the candidate's own
+  // facts, just plausible-sounding guesses for the job family, and a thin role should read
+  // as thin, not be inflated to look like it has more real material than it does.
 
   // Skills: matched items first inside each group, most relevant groups first
   const isMatch = (item) => terms.some(t => countMatches(t.re, item) > 0 || t.name.toLowerCase() === String(item).toLowerCase());
@@ -1045,7 +1041,7 @@ export function tailorCV({ title = '', company = '', description = '', confirmed
   }
 
   // Recruiter polish: weak openers ("Responsible for building…") become action verbs and
-  // filler words go. Only the wording changes, never the facts or numbers.
+  // filler words go. Only the wording changes, never the facts.
   const rewrites = [];
   for (const job of experience) {
     for (const b of job.bullets) {
@@ -1054,6 +1050,20 @@ export function tailorCV({ title = '', company = '', description = '', confirmed
     }
   }
   if (rewrites.length) changes.push(`Rewrote ${rewrites.length} bullet${rewrites.length > 1 ? 's' : ''} to open with an action verb and drop filler words`);
+
+  // Numbers are NOT shown by default — neither added (see below) nor kept when the
+  // candidate's own bullet already has one. "Don't add numbers" means don't surface them at
+  // all until asked for, not "don't invent new ones but keep real ones". Stays available on
+  // request: "add my real achievements/numbers back" restores them from this same source
+  // text (never a different, invented figure).
+  let destat = 0;
+  for (const job of experience) {
+    for (const b of job.bullets) {
+      const stripped = stripMeasuredClause(b.text);
+      if (stripped !== b.text) { destat++; b.text = stripped; }
+    }
+  }
+  if (destat) changes.push(`Left the measured result out of ${destat} point${destat > 1 ? 's' : ''} by default — ask to "add numbers/metrics" if you want them shown`);
 
   // Measured results are NOT added by default here — only the wording is tightened above.
   // Drafting an "approximately N%" estimate onto every un-measured bullet is a real,
@@ -1404,7 +1414,7 @@ const MEASURE = new RegExp(String.raw`\d+(?:\.\d+)?\s*(?:%|x\b|\+)|[$£€₹]\s
   + String.raw`\b(?:team|group|squad|staff|cohort) of \d+\b|\b(?:top|over|under|within|than) \d+(?:\.\d+)?\b`, 'i');
 // A year ("in 2021") is not a result; "2000 users" is
 const YEAR_ONLY = new RegExp(String.raw`\b(?:19|20)\d{2}\b(?!\s*(?:\+|%|${UNITS})\b)`, 'gi');
-const hasMeasure = (text) => MEASURE.test(String(text).replace(YEAR_ONLY, ''));
+export const hasMeasure = (text) => MEASURE.test(String(text).replace(YEAR_ONLY, ''));
 // Z: how it was done (a method word or a named technology)
 const hasMethod = (text) => /\b(by|using|with|through|via|leveraging|built on|powered by|on top of)\b/i.test(text)
   || TERMS.some(t => t.category !== 'Ways of Working' && countMatches(t.re, text) > 0);
@@ -2066,6 +2076,24 @@ const CERTIFICATIONS_FOR = {
 // Shorter points: the vague ending goes ("…, enabling reliable releases with minimal downtime")
 const VAGUE_ENDING = /,\s*(?:and\s+)?(?:enabling|improving|ensuring|supporting|delivering|helping|collaborating|maintaining|increasing|allowing|providing|making|resulting|driving|leading to|which|while)\b[^,]*$|\s+(?:to|in order to)\s+(?:ensure|improve|support|enable|deliver|help|maintain|provide|allow|accelerate|keep)\b[^,]*$/i;
 
+// Default behavior: a quantified result already in the candidate's own bullet text is not
+// shown unless the request explicitly asked for real achievements/metrics — "don't add
+// numbers" was never meant to mean "unless the number was already there". Conservative: only
+// strips a clean trailing clause containing the number (comma, or to/by/through/across/for +
+// clause); a bullet whose number is too embedded mid-sentence to safely remove is left
+// unchanged rather than risk a broken sentence.
+const MEASURED_CLAUSE = /,\s*(?:thereby\s+|which\s+|and\s+)?(?:achiev(?:ing|ed)|reach(?:ing|ed)|sav(?:ing|ed)|cut(?:ting)?|reduc(?:ing|ed)|improv(?:ing|ed)|increas(?:ing|ed)|process(?:ing|ed)|handl(?:ing|ed)|serv(?:ing|ed)|deliver(?:ing|ed)|support(?:ing|ed)|index(?:ing|ed)|cover(?:ing|ed)|lift(?:ing)?|boost(?:ing|ed)|driv(?:ing)?|tak(?:ing)?|sustain(?:ing|ed)|scal(?:ing|ed)|remov(?:ing|ed)|shorten(?:ing|ed)|shav(?:ing|ed)|rais(?:ing|ed)|grow(?:ing)?|expand(?:ing|ed))\b[^,]*\d[^,]*$|\s+that\s+[^,]*\d[^,.]*$|\s+(?:to|by|through|across|from|for)\s+[^,]*\d[^,.]*$/i;
+function stripMeasuredClause(text) {
+  const t = String(text || '').trim();
+  if (!t || !hasMeasure(t)) return t;
+  if (MEASURED_CLAUSE.test(t)) {
+    let out = t.replace(MEASURED_CLAUSE, '').trim().replace(/[,\s]+$/, '');
+    if (out && !/[.!?]$/.test(out)) out += '.';
+    if (out && hasAction(out) && words(out) >= 4 && !hasMeasure(out)) return out;
+  }
+  return t;
+}
+
 // "Senior Engineer at Acme (2019 – 2021)" / "Senior Engineer | Acme | 2019 – 2021"
 function parseJob(text) {
   const t = String(text).trim();
@@ -2113,6 +2141,39 @@ function editNumbers(s) {
   return (String(s).match(/\d[\d,.]*/g) || []).map(n => n.replace(/[,.]$/, '').replace(/,/g, ''));
 }
 
+const toWords = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+
+/**
+ * Whether `text` contains a 6-word sequence copied straight from the job posting — the
+ * deterministic backstop for "never copy JD phrasing" (the prompts already say this, but a
+ * prompt is advisory; this is enforced). A 6-word match is specific enough that it can't be
+ * incidental word overlap, short enough to catch a copied clause even inside a longer,
+ * otherwise-original sentence.
+ */
+export function copiesJdText(text, jdText) {
+  const jdWords = toWords(jdText);
+  if (jdWords.length < 6) return false;
+  const jdGrams = new Set();
+  for (let i = 0; i + 6 <= jdWords.length; i++) jdGrams.add(jdWords.slice(i, i + 6).join(' '));
+  const textWords = toWords(text);
+  for (let i = 0; i + 6 <= textWords.length; i++) {
+    if (jdGrams.has(textWords.slice(i, i + 6).join(' '))) return true;
+  }
+  return false;
+}
+
+/** Whether any two lines in the list are the same once normalized — a repeated bullet. */
+export function hasDuplicateLines(lines) {
+  const seen = new Set();
+  for (const l of lines) {
+    const n = toWords(l).join(' ');
+    if (!n) continue;
+    if (seen.has(n)) return true;
+    seen.add(n);
+  }
+  return false;
+}
+
 /**
  * Whether an AI's whole-CV rewrite only did what was asked: no new employer, school or
  * certification the person didn't name, and no new number that isn't already on the CV,
@@ -2125,11 +2186,31 @@ function editNumbers(s) {
  * The quality checks (no filler/no-content lines, no stock resume phrases) always run
  * regardless: "don't fact-check this" and "don't care if it reads well" are different
  * asks, and turning one off was never meant to turn off the other.
+ * @param {string} [jdText] the job posting's own text, when known — enables the
+ * near-verbatim-copying check; harmless to omit, that check just doesn't run.
  */
-export function validateWholeCvEdit(original, edited, requestText, unfiltered = false) {
+export function validateWholeCvEdit(original, edited, requestText, unfiltered = false, jdText = '') {
   if (!edited || typeof edited !== 'object' || !edited.name || !String(edited.name).trim()) return false;
   // never silently wipe out all experience
   if (original.experience && original.experience.length && edited.experience && !edited.experience.length) return false;
+  // Same guard, but for a single role silently going missing rather than all of them: a
+  // request about one job (or nothing job-related at all) must never come back with a
+  // DIFFERENT job gone too — every original company must still be present, unless the
+  // request itself actually asked to remove that specific one.
+  const asked = String(requestText || '').toLowerCase();
+  const isRemovalRequest = /\b(?:remove|delete|drop|take out)\b/i.test(asked);
+  const keptUnlessAskedToRemove = (origList, editedList, key) => {
+    if (!origList || !editedList) return true;
+    const stillThere = new Set(editedList.map(x => String(x[key] || '').toLowerCase()));
+    const missing = origList.filter(x => x[key] && !stillThere.has(String(x[key]).toLowerCase()));
+    return !missing.some(x => !isRemovalRequest || !asked.includes(String(x[key]).toLowerCase()));
+  };
+  // A request about one role (or nothing role-related at all) must never come back with a
+  // DIFFERENT role, project or school silently gone too — unless the request itself
+  // actually asked to remove that specific one, by name.
+  if (!keptUnlessAskedToRemove(original.experience, edited.experience, 'company')) return false;
+  if (!keptUnlessAskedToRemove(original.projects, edited.projects, 'name')) return false;
+  if (!keptUnlessAskedToRemove(original.education, edited.education, 'school')) return false;
   if (!unfiltered) {
     const asked = String(requestText || '').toLowerCase();
     const was = (list) => new Set((list || []).map(x => String(x).toLowerCase()));
@@ -2140,8 +2221,16 @@ export function validateWholeCvEdit(original, edited, requestText, unfiltered = 
       && (edited.education || []).every(e => schools.has(String(e.school).toLowerCase()) || asked.includes(String(e.school).toLowerCase()))
       && (edited.certifications || []).every(c => certs.has(String(c).toLowerCase()) || asked.includes(String(c).toLowerCase()));
     if (!namesOk) return false;
-    // every number in the result must already be on the CV, in the request, or marked as
-    // an estimate ("approximately 30%", "about 500 users")
+  }
+  // Inventing a precise-looking number is a different, higher-stakes kind of fabrication
+  // than everything else "unfiltered" covers — so it isn't governed by that toggle alone.
+  // It's only allowed when the specific request actually asked for an achievement/number/
+  // metric (same trigger the rule engine itself uses for this); a request that didn't ask
+  // for that — even with fact-check off — must not come back with new invented figures.
+  // Every number must already be on the CV, in the request, or marked as an estimate
+  // ("approximately 30%", "about 500 users").
+  const requestedNumbers = /\b(?:numbers?|metrics?|achievements?|accomplishments?|figures|quantif\w*|measurable|measured)\b/i.test(requestText);
+  if (!unfiltered || !requestedNumbers) {
     const allowed = new Set([...editNumbers(JSON.stringify(original)), ...editNumbers(requestText)]);
     const re = /((?:approximately|about)\s+)?\b\d[\d,.]*\b/gi;
     let m;
@@ -2167,6 +2256,16 @@ export function validateWholeCvEdit(original, edited, requestText, unfiltered = 
   ].filter(Boolean);
   if (newLines.some(l => !origLines.has(norm(l)) && hasNoConcreteContent(l))) return false;
   if (newLines.some(l => !origLines.has(norm(l)) && hasCliche(l))) return false;
+  // Deterministic backstop for "never copy the job posting" — a prompt instruction alone
+  // isn't enforcement. Only checked against genuinely new/changed lines, same as the checks
+  // above, so a JD phrase that happened to already be on the CV before this edit isn't
+  // flagged as newly copied.
+  if (jdText && newLines.some(l => !origLines.has(norm(l)) && copiesJdText(l, jdText))) return false;
+  // A model asked to "fix the red flags" or similar sometimes pads by repeating a bullet
+  // (verbatim or reworded identically) across two roles. Only flagged when the duplication
+  // is newly introduced — a pre-existing repeat already on the original CV isn't this edit's
+  // fault, and rejecting the whole edit over it would make an unrelated request fail too.
+  if (newLines.some(l => !origLines.has(norm(l))) && hasDuplicateLines(newLines)) return false;
   return true;
 }
 
@@ -2195,8 +2294,10 @@ export function applyInstructions(input, text, { whole = false, job = null, unfi
   for (const raw of lines) {
     const line = normalizeRequest(raw);
     let m;
-    // "Add realistic achievements / numbers / metrics": applied to every point without a number
-    if (!/["“]/.test(line) && !/^(?:remove|delete|drop)\b/i.test(line)
+    // "Add realistic achievements / numbers / metrics": applied to every point without a
+    // number. Never fires on the negated form ("do not show the achievements", "don't add
+    // numbers", "hide the metrics") — those ask for the opposite and fall through instead.
+    if (!/["“]/.test(line) && !/^(?:remove|delete|drop|hide|stop showing)\b|^(?:do|does)\s*n'?t\b|^(?:do|does)\s+not\b/i.test(line)
       && /\b(?:numbers?|metrics?|achievements?|accomplishments?|figures|quantif\w*|measurable|measured)\b/i.test(line)) {
       const list = draftNumbers(cv);
       for (const d of list) {

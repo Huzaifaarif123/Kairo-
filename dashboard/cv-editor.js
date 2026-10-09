@@ -50,6 +50,7 @@ const tailorWs = cveWorkspace({
     if (typeof renderTailorReview === 'function') renderTailorReview();
     if (typeof instructSync === 'function') instructSync();
     renderTailorPreview();
+    if (typeof saveTailorDraft === 'function') saveTailorDraft();
   }
 });
 

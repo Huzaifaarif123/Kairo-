@@ -162,6 +162,7 @@ function resetTailor() {
   document.getElementById('tailor-analysis').hidden = true;
   document.getElementById('tailor-preview').hidden = true;
   document.getElementById('tailor-empty').hidden = false;
+  if (typeof clearTailorDraft === 'function') clearTailorDraft();
 }
 
 // ---------- Editor ----------
