@@ -476,6 +476,11 @@ Requirements:
                   </ul>
                   <p>Click <strong>+</strong> to put an example in the box, finish it, then click <strong>Apply to CV</strong>. Only what you write is added. Points you add are cleaned up (first person removed, tools spelled properly), never invented.</p>
                 </details>
+                <details class="instruct-memory" id="tailor-corrections" ontoggle="loadCorrections(this)">
+                  <summary>Corrections you've taught it <span class="instruct-memory-count" id="tailor-corrections-count"></span></summary>
+                  <p class="instruct-memory-intro">When an AI answer is wrong, click <strong>Wrong answer? Fix it</strong> under it and write what it should have said. Your answer is saved here and added to the AI's instructions for questions like it from then on, so it answers your way next time. This doesn't retrain the model — it's shown your correction each time, which is why removing one takes effect immediately.</p>
+                  <div class="instruct-memory-list" id="tailor-corrections-list"></div>
+                </details>
               </div>
               <div class="paper">
                 <iframe id="tailor-frame" title="Tailored CV preview"></iframe>

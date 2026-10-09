@@ -31,6 +31,27 @@ const PROVIDER = GROQ_KEY
 /** Whether any cloud model (Gemini, Groq or OpenRouter) is configured. */
 export const cloudAiConfigured = Boolean(GEMINI_KEY || PROVIDER);
 
+/**
+ * Which cloud model the next request will actually use, for the line the server prints on
+ * startup. A key pasted into web/.env.local is otherwise silent until the first AI request
+ * fails, which is a slow and confusing way to find out it didn't take — a typo'd variable
+ * name or a key on the wrong line reads exactly like "the AI is broken".
+ */
+export const cloudAiDescription = GEMINI_KEY
+  ? `Gemini (${GEMINI_MODEL})${PROVIDER ? `, falling back to ${PROVIDER.url.includes('groq') ? 'Groq' : 'OpenRouter'}` : ''}`
+  : PROVIDER
+    ? `${PROVIDER.url.includes('groq') ? 'Groq' : 'OpenRouter'} (${PROVIDER.model})`
+    : '';
+
+/**
+ * Appends this request's corrections memory (see corrections.js) to a system prompt. The
+ * owner's past corrections go last, after the standing rules, so they read as the most
+ * recent and most specific instruction on the point they cover. An empty memory — no
+ * stored correction close enough to this request, which is the normal case — returns the
+ * prompt completely untouched, so a request without one is byte-for-byte what it always was.
+ */
+const withMemory = (prompt, memory) => (memory ? `${prompt}\n\n${memory}` : prompt);
+
 const EDIT_PROMPT = `You edit a CV exactly as its owner asks. You receive the CV as JSON and their requests.
 Reply with ONLY a JSON object, no other text, shaped exactly like this:
 {"cv": { <only the top-level CV fields you changed> }, "changes": [ <short plain-English descriptions of what you changed> ], "notDone": [ <any request you could not do, as "<the request> — <short reason>"> ]}
@@ -114,8 +135,8 @@ export async function chatJSON(systemPrompt, userContent, timeoutMs = 60_000, ma
   return chatJSONOpenAICompatible(systemPrompt, userContent, timeoutMs, maxTokens);
 }
 
-async function askCloud(cv, requests) {
-  return chatJSON(EDIT_PROMPT, `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n<requests>\n${requests.join('\n')}\n</requests>`);
+async function askCloud(cv, requests, memory) {
+  return chatJSON(withMemory(EDIT_PROMPT, memory), `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n<requests>\n${requests.join('\n')}\n</requests>`);
 }
 
 const TAILOR_REWRITE_PROMPT = `You rewrite a candidate's CV to align it closely with one specific job description. You receive the CV as JSON and the job posting. Reply with ONLY a JSON object:
@@ -182,9 +203,9 @@ export async function rewriteTailoredCv(cv, job) {
 const ASK_PROMPT = `You answer questions about a CV, honestly and specifically, using only what's in the CV JSON you're given (and the job posting, if one is given). Reply with ONLY a JSON object: {"answers": {"<question, exactly as asked>": "<a short, specific, plain-English answer, 1-3 sentences>"}}. One entry per question. Never invent facts not in the CV; if something truly can't be answered from the CV, say so plainly in the answer rather than guessing.`;
 
 /** A short, specific answer for each question, grounded only in the CV (and job, if given). */
-export async function answerQuestions(cv, job, questions) {
+export async function answerQuestions(cv, job, questions, memory = '') {
   const user = `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n${job && (job.title || job.description) ? `<job_posting>\nTitle: ${job.title || ''}\n${job.description || ''}\n</job_posting>\n\n` : ''}<questions>\n${questions.join('\n')}\n</questions>`;
-  const out = await chatJSON(ASK_PROMPT, user, 30_000, 2000);
+  const out = await chatJSON(withMemory(ASK_PROMPT, memory), user, 30_000, 2000);
   return out && typeof out.answers === 'object' && out.answers ? out.answers : {};
 }
 
@@ -221,15 +242,17 @@ export async function stripBulletNumbers(bullets) {
  * otherwise fabricate facts: invented technologies, numbers, even employers).
  * @param {string} [jdText] the job posting's text, so the honesty check can also catch
  * the model copying it verbatim.
+ * @param {string} [memory] this request's corrections memory (corrections.js), appended
+ * to the system prompt so an edit the owner has already corrected once comes back right.
  */
-export async function applyWithCloudModel(result, unfiltered = false, jdText = '') {
+export async function applyWithCloudModel(result, unfiltered = false, jdText = '', memory = '') {
   if (!result.pending.length) return true;
   const requestText = result.pending.join('\n');
   const originalMessage = result.unclear.find(u => u.startsWith(requestText));
   const fallback = (reason) => originalMessage || `${requestText} — ${reason}`;
   let out;
   try {
-    out = await askCloud(result.cv, result.pending);
+    out = await askCloud(result.cv, result.pending, memory);
   } catch (err) {
     console.error('Cloud model failed:', err.message);
     // A free-tier rate limit is common under quick back-to-back requests — say so

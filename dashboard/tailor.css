@@ -581,6 +581,43 @@ button.req-chip:focus-visible { outline: 2px solid var(--accent, #4f46e5); outli
 .instruct-answer p { margin: 4px 0 0; color: var(--text); line-height: 1.5; overflow-wrap: anywhere; }
 .instruct-wait { margin: 0; font-size: 12.5px; color: var(--text-2); }
 
+/* "Wrong answer? Fix it" under an AI answer — the correction is stored per profile and
+   fed back into later prompts (corrections.js), so the same question comes back right. */
+.instruct-fix { margin-top: 8px; display: grid; gap: 6px; }
+.instruct-fix-open { justify-self: start; padding: 0; border: 0; background: none; color: var(--text-3); font: inherit; font-size: 12px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.instruct-fix-open:hover { color: var(--accent); }
+.instruct-fix-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.instruct-fix-label { font-size: 12px; font-weight: 600; color: var(--text-2); }
+.instruct-fix-text { width: 100%; resize: vertical; font: inherit; font-size: 13px; line-height: 1.45; padding: 8px 10px; }
+.instruct-fix-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.instruct-fix-save, .instruct-fix-cancel { height: 30px; padding: 0 12px; border-radius: var(--radius-sm); font: inherit; font-size: 12px; cursor: pointer; }
+.instruct-fix-save { border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); }
+.instruct-fix-save:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.instruct-fix-save:disabled { opacity: 0.6; cursor: default; }
+.instruct-fix-cancel { border: 1px solid var(--border-strong); background: transparent; color: var(--text-2); }
+.instruct-fix-cancel:hover { color: var(--text); border-color: var(--text-3); }
+.instruct-fix-saved { font-size: 12px; color: var(--ok); }
+.instruct-fix-undo { margin-left: 2px; padding: 0; border: 0; background: none; color: var(--text-3); font: inherit; font-size: 12px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.instruct-fix-undo:hover { color: var(--accent); }
+.instruct-fix-undo:disabled { opacity: 0.6; cursor: default; }
+
+/* "Corrections you've taught it": the stored corrections, and removing one. */
+.instruct-memory { margin-top: 10px; font-size: 12.5px; }
+.instruct-memory > summary { cursor: pointer; color: var(--text-2); }
+.instruct-memory > summary:hover { color: var(--text); }
+.instruct-memory-count { color: var(--text-3); }
+.instruct-memory-intro { margin: 6px 0 10px; color: var(--text-2); line-height: 1.5; }
+.instruct-memory-list { display: grid; gap: 6px; }
+.instruct-memory-empty { margin: 0; color: var(--text-3); }
+.instruct-memory-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.instruct-memory-body { flex: 1; min-width: 0; }
+.instruct-memory-asked { color: var(--text-3); overflow-wrap: anywhere; }
+.instruct-memory-answer { margin-top: 2px; color: var(--text); line-height: 1.45; overflow-wrap: anywhere; }
+.instruct-memory-remove { flex-shrink: 0; height: 26px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; }
+.instruct-memory-remove:hover:not(:disabled) { color: var(--warn); border-color: var(--warn); }
+.instruct-memory-remove:disabled { opacity: 0.6; cursor: default; }
+@media (max-width: 520px) { .instruct-memory-row { flex-direction: column; } .instruct-memory-remove { align-self: flex-start; } }
+
 /* "Ask AI to change this section" inside Edit CV */
 .cve-ai { margin-top: 12px; padding: 10px 12px; border: 1px dashed var(--accent-ring); border-radius: var(--radius-sm); background: var(--accent-soft); display: grid; gap: 6px; }
 .cve-ai-label { font-size: 12px; font-weight: 600; color: var(--text); }

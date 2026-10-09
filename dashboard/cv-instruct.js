@@ -95,7 +95,10 @@ async function applyInstruct(button) {
       }).then(res => res.json()).then(data => {
         for (const [q, answer] of Object.entries(data.answers || {})) {
           const p = document.querySelector(`.instruct-answer[data-q="${CSS.escape(q)}"] p`);
-          if (p && answer) p.textContent = answer;
+          if (p && answer) {
+            p.textContent = answer;
+            attachAnswerFix(p.parentElement, q, answer);
+          }
         }
       }).catch(() => {});
     }
@@ -133,7 +136,7 @@ async function applyInstruct(button) {
       (data.unfiltered ? '<div class="instruct-unfiltered-warning"><strong>Fact-check was off for this request.</strong> The AI\'s output was applied without checking for invented technologies, numbers or claims — review it before using this CV.</div>' : '')
       + summaryNote + questions.map(q => `<div class="instruct-answer"><strong>${escapeHtml(q)}</strong><p>${answerInstructQuestion(q)}</p></div>`).join('')
       + (data.done.length ? `<ul class="instruct-done">${data.done.map(d => `<li>${escapeHtml(d)}</li>`).join('')}</ul>` : '')
-      + (data.unclear.length ? `<div class="instruct-unclear"><strong>Not changed</strong> (left in the box):<ul>${data.unclear.map(u => `<li>${escapeHtml(u)}</li>`).join('')}</ul>${data.ai ? 'Try describing it a different way — say exactly what you did, or name the job or section.' : 'Try one of the examples below. For anything else, I need an AI key added (Anthropic, Groq or OpenRouter), or the local AI (Ollama) running.'}</div>` : ''));
+      + (data.unclear.length ? `<div class="instruct-unclear"><strong>Not changed</strong> (left in the box):<ul>${data.unclear.map(u => `<li>${escapeHtml(u)}</li>`).join('')}</ul>${data.ai ? 'Try describing it a different way — say exactly what you did, or name the job or section.' : 'Try one of the examples below. For anything else, I need an AI key in web/.env.local (Gemini is free — see web/env.local.example), or the local AI (Ollama) running.'}</div>` : ''));
     if (typeof saveTailorDraft === 'function') saveTailorDraft();
   } catch (err) {
     const timedOut = err.name === 'TimeoutError' || err.name === 'AbortError';
@@ -280,4 +283,176 @@ function answerInstructQuestion(q) {
 // "Generate (a generic / new / profile) summary (for this JD)", "write my summary for this job"
 function isSummaryRequest(line) {
   return /^(?:please\s+|can you\s+|could you\s+)?(?:generate|regenerate|write|rewrite|create|make|give(?:\s+me)?|redo|refresh|build|draft|improve|strengthen|enhance|polish|refine|tighten|fix)\s+(?:me\s+)?(?:a\s+|an\s+|the\s+|my\s+)?(?:new\s+|generic\s+|fresh\s+|tailored\s+|proper\s+|better\s+|good\s+|strong\s+)*(?:profile\s+|professional\s+|cv\s+)?summary(?:\s+(?:for|to match|matching|based on|according to)\s+(?:this|the|my)\s+(?:jd|job|job description|role|position|posting))?[.!?]*$/i.test(line);
+}
+
+// ---------- "Fix this answer": correcting a wrong AI answer ----------
+
+// Only AI answers get this. The correction is stored against the active profile (server
+// side: corrections.js) and appended to the system prompt of later questions like it, so
+// the same question — or a reworded one — comes back right and in the length you wrote.
+// Nothing about the model changes: it is shown your correction, not trained on it.
+function attachAnswerFix(card, question, answer) {
+  if (!card || card.querySelector('.instruct-fix')) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'instruct-fix';
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'instruct-fix-open';
+  open.textContent = 'Wrong answer? Fix it';
+  open.title = 'Tell Kairo what this should have said, and it will use your answer next time';
+  open.addEventListener('click', () => openAnswerFix(wrap, question, answer));
+  wrap.appendChild(open);
+  card.appendChild(wrap);
+}
+
+function openAnswerFix(wrap, question, answer) {
+  wrap.innerHTML = '';
+  const label = document.createElement('label');
+  label.className = 'instruct-fix-label';
+  label.textContent = 'What should it have said?';
+  const area = document.createElement('textarea');
+  area.className = 'instruct-fix-text';
+  area.rows = 3;
+  area.placeholder = 'Write the answer you wanted — as short as you want it to be next time.';
+  const row = document.createElement('div');
+  row.className = 'instruct-fix-row';
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.className = 'instruct-fix-save';
+  save.textContent = 'Save correction';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'instruct-fix-cancel';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', () => {
+    wrap.innerHTML = '';
+    attachAnswerFix(wrap.parentElement, question, answer);
+  });
+  save.addEventListener('click', () => saveAnswerFix(wrap, question, answer, area, save));
+  // Enter saves, Shift+Enter starts a new line — the same keys as the instruction box
+  area.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+    e.preventDefault();
+    if (!save.disabled) saveAnswerFix(wrap, question, answer, area, save);
+  });
+  row.append(save, cancel);
+  wrap.append(label, area, row);
+  area.focus();
+}
+
+async function saveAnswerFix(wrap, question, answer, area, save) {
+  const corrected = area.value.trim();
+  if (!corrected) {
+    showToast('Write what the answer should have said first');
+    area.focus();
+    return;
+  }
+  save.disabled = true;
+  save.textContent = 'Saving…';
+  try {
+    const res = await fetch(apiUrl('/api/corrections'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(15_000),
+      body: JSON.stringify({ scope: 'ask', prompt: question, badAnswer: answer, corrected })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not save that correction');
+    wrap.innerHTML = '';
+    const note = document.createElement('span');
+    note.className = 'instruct-fix-saved';
+    note.textContent = 'Saved — Kairo will answer this your way from now on. ';
+    const undo = document.createElement('button');
+    undo.type = 'button';
+    undo.className = 'instruct-fix-undo';
+    undo.textContent = 'Undo';
+    undo.addEventListener('click', async () => {
+      undo.disabled = true;
+      try {
+        await fetch(`${apiUrl('/api/corrections')}&id=${encodeURIComponent(data.id)}`, { method: 'DELETE', signal: AbortSignal.timeout(15_000) });
+        wrap.innerHTML = '';
+        attachAnswerFix(wrap.parentElement, question, answer);
+        showToast('Correction removed');
+      } catch {
+        undo.disabled = false;
+        showToast('Could not remove that correction');
+      }
+    });
+    note.appendChild(undo);
+    wrap.appendChild(note);
+    const panel = document.getElementById('tailor-corrections');
+    if (panel && panel.open) loadCorrections(panel);
+  } catch (err) {
+    save.disabled = false;
+    save.textContent = 'Save correction';
+    showToast(err.message || 'Could not save that correction');
+  }
+}
+
+// ---------- "Corrections you've taught it": seeing and removing what's stored ----------
+
+// Loaded when the panel is opened rather than on page load — it's a file read per request
+// on the server, and most sessions never open it.
+async function loadCorrections(panel) {
+  if (!panel.open) return;
+  const list = document.getElementById('tailor-corrections-list');
+  const count = document.getElementById('tailor-corrections-count');
+  list.textContent = 'Loading…';
+  try {
+    const res = await fetch(apiUrl('/api/corrections'), { signal: AbortSignal.timeout(15_000) });
+    const saved = await res.json();
+    if (!res.ok) throw new Error(saved.error || 'Could not load your corrections');
+    renderCorrections(Array.isArray(saved) ? saved : []);
+  } catch (err) {
+    count.textContent = '';
+    list.textContent = err.message || 'Could not load your corrections';
+  }
+}
+
+function renderCorrections(saved) {
+  const list = document.getElementById('tailor-corrections-list');
+  const count = document.getElementById('tailor-corrections-count');
+  count.textContent = saved.length ? `(${saved.length})` : '';
+  list.innerHTML = '';
+  if (!saved.length) {
+    list.innerHTML = '<p class="instruct-memory-empty">Nothing yet. Ask a question, and if the answer is wrong, correct it — it will show up here.</p>';
+    return;
+  }
+  for (const c of saved) {
+    const row = document.createElement('div');
+    row.className = 'instruct-memory-row';
+    const body = document.createElement('div');
+    body.className = 'instruct-memory-body';
+    const asked = document.createElement('div');
+    asked.className = 'instruct-memory-asked';
+    // "edit" corrections apply to CV changes, "ask" ones to questions — worth showing,
+    // since the two are kept apart and never cross over into each other's prompts.
+    asked.textContent = `${c.scope === 'edit' ? 'On the CV change' : 'On the question'}: ${c.prompt}`;
+    const answer = document.createElement('div');
+    answer.className = 'instruct-memory-answer';
+    answer.textContent = c.corrected;
+    body.append(asked, answer);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'instruct-memory-remove';
+    remove.textContent = 'Remove';
+    remove.title = 'Stop using this correction';
+    remove.addEventListener('click', async () => {
+      remove.disabled = true;
+      try {
+        const res = await fetch(`${apiUrl('/api/corrections')}&id=${encodeURIComponent(c.id)}`, { method: 'DELETE', signal: AbortSignal.timeout(15_000) });
+        if (!res.ok) throw new Error('Could not remove that correction');
+        row.remove();
+        const left = document.querySelectorAll('.instruct-memory-row').length;
+        document.getElementById('tailor-corrections-count').textContent = left ? `(${left})` : '';
+        if (!left) renderCorrections([]);
+        showToast('Correction removed');
+      } catch (err) {
+        remove.disabled = false;
+        showToast(err.message || 'Could not remove that correction');
+      }
+    });
+    row.append(body, remove);
+    list.appendChild(row);
+  }
 }
