@@ -1297,7 +1297,7 @@ function renderTailorAiNote(ai) {
   const note = document.getElementById('tailor-ai-note');
   if (ai.used) {
     note.className = 'tailor-ai-note ok';
-    note.innerHTML = '<strong>Rewritten by AI</strong> for this job, using only facts from your profile and skills you confirmed.';
+    note.innerHTML = '<strong>Rewritten by AI</strong> to match this job description.';
     note.hidden = false;
     return;
   }

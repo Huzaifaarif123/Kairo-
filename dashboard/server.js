@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { tailorCV, saveTailoredCV, renderTailoredCV, profileToCV, applyInstructions, scopeCV, scopeText, mergeScoped, hasMeasure } from './tailor.js';
 import { applyWithLocalModel, localModelReady } from './local-llm.js';
-import { cloudAiConfigured, applyWithCloudModel, answerQuestions, stripBulletNumbers } from './cloud-llm.js';
+import { cloudAiConfigured, applyWithCloudModel, answerQuestions, stripBulletNumbers, rewriteTailoredCv } from './cloud-llm.js';
 import { compileLatexWithRetry, LatexCompileError } from './latex-compile.js';
 import { resolveProfile, listProfiles, profileDetails, usesOriginalOwner, readProfileMarkdown, writeProfileMarkdown, evaluateAgainstProfile } from './profiles.js';
 
@@ -353,7 +353,7 @@ const server = http.createServer(async (req, res) => {
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
       try {
-        const { title = '', company = '', description = '', save = false, confirmedSkills = [], latex, filename, template = '', styles = {}, profileMarkdown } = JSON.parse(body || '{}');
+        const { title = '', company = '', description = '', save = false, confirmedSkills = [], ai = true, latex, filename, template = '', styles = {}, profileMarkdown } = JSON.parse(body || '{}');
         // "Save to cv/": the exact CV on screen
         if (save && typeof latex === 'string' && typeof filename === 'string') {
           if (!/^main_[A-Za-z0-9_]+\.tex$/.test(filename) || !latex.trim() || latex.length > 300000) {
@@ -380,7 +380,7 @@ const server = http.createServer(async (req, res) => {
         }
         // Skills the candidate confirmed they have, for gaps their profile doesn't mention
         const confirmed = Array.isArray(confirmedSkills) ? confirmedSkills.map(String).filter(s => s.trim() && s.length <= 60).slice(0, 60) : [];
-        const result = tailorCV({ title, company, description, confirmedSkills: confirmed }, profileMd, { template: String(template || ''), styles: styles && typeof styles === 'object' ? styles : {} });
+        let result = tailorCV({ title, company, description, confirmedSkills: confirmed }, profileMd, { template: String(template || ''), styles: styles && typeof styles === 'object' ? styles : {} });
         if (!result.cv.name || !result.cv.experience.length) {
           res.writeHead(422, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: `The ${profile.label} profile is still empty. Fill in its name and experience first.` }));
@@ -389,14 +389,34 @@ const server = http.createServer(async (req, res) => {
         // A number the regex pass in tailorCV couldn't safely lift out (it sits mid-sentence
         // as a direct object, not a clean trailing clause) still isn't shown by default — one
         // batched AI call cleans up whatever's left, never blocking the tailor if it fails.
-        {
-          const flat = result.cv.experience.flatMap(x => x.bullets.map((_, j) => [x, j]));
+        const stripResidualNumbers = async (cv) => {
+          const flat = cv.experience.flatMap(x => x.bullets.map((_, j) => [x, j]));
           const toFix = flat.filter(([x, j]) => hasMeasure(x.bullets[j]));
-          if (toFix.length) {
-            const cleaned = await stripBulletNumbers(toFix.map(([x, j]) => x.bullets[j]));
-            toFix.forEach(([x, j], i) => { if (cleaned[i]) x.bullets[j] = cleaned[i]; });
+          if (!toFix.length) return;
+          const cleaned = await stripBulletNumbers(toFix.map(([x, j]) => x.bullets[j]));
+          toFix.forEach(([x, j], i) => { if (cleaned[i]) x.bullets[j] = cleaned[i]; });
+        };
+        await stripResidualNumbers(result.cv);
+        // Aligns the summary, skills and experience bullets with this job description in
+        // the cloud model's own words — not limited to only what tailorCV() already picked
+        // out verbatim from the profile (see rewriteTailoredCv's prompt for the firm
+        // limits it still keeps: no invented employer/title/degree/school/cert, no number
+        // that wasn't already there). Falls back to the rule-based result on any failure.
+        const aiInfo = { configured: cloudAiConfigured, used: false };
+        if (ai !== false && cloudAiConfigured) {
+          try {
+            const rewrite = await rewriteTailoredCv(result.cv, { title, company, description });
+            if (rewrite) {
+              const rendered = renderTailoredCV(rewrite.cv, { title, company, description, confirmedSkills: confirmed }, profileMd, { template: String(template || ''), styles: styles && typeof styles === 'object' ? styles : {} });
+              result = { ...result, ...rendered, changes: [...result.changes, ...rewrite.changes] };
+              await stripResidualNumbers(result.cv);
+              Object.assign(aiInfo, { used: true });
+            }
+          } catch (err) {
+            console.error('Tailor rewrite failed:', err);
           }
         }
+        result.ai = aiInfo;
         if (save) result.savedTo = saveTailoredCV(result, ROOT_DIR);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));

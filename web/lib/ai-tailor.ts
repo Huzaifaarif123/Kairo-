@@ -2,13 +2,14 @@
 //
 // The rule-based engine (tailor.js) first works out which requirements the candidate
 // covers and picks the most relevant content. Claude then rewrites the headline,
-// summary, skills and bullets so they read naturally and use the posting's wording,
-// using only facts from the profile and skills the candidate confirmed.
+// summary, skills and bullets to speak directly to the posting — it can describe the
+// candidate's real work in the posting's own vocabulary and plausibly extend it, not
+// just rearrange what the rule-based pass already picked out verbatim.
 //
-// Everything Claude returns is checked before it's used: every number must already be
-// in the profile, every skill must be in the profile or confirmed, and roles keep their
-// original titles, companies and dates. Anything that fails a check falls back to the
-// rule-based version, so a rewrite can never add facts the profile doesn't have.
+// Everything Claude returns is still checked before it's used: the candidate's real
+// career facts (employers, titles, companies, dates, degrees, schools, certifications)
+// never change, and no number/metric is added that wasn't already in the profile.
+// Anything that fails a check falls back to the rule-based version.
 //
 // Needs ANTHROPIC_API_KEY. Without it (or if the call fails) the rule-based CV is used.
 
@@ -45,14 +46,13 @@ const RewriteSchema = z.object({
 
 type Rewrite = z.infer<typeof RewriteSchema>;
 
-const SYSTEM_PROMPT = `You are an expert technical CV writer. You tailor a candidate's CV to one job posting so it is accurate, concise and matches the posting as closely as the candidate's real experience allows.
+const SYSTEM_PROMPT = `You are an expert technical CV writer. You tailor a candidate's CV to one job posting so it reads as a strong match for that posting, grounded in the candidate's real career but shaped and extended to speak directly to what the posting is asking for.
 
-Honesty rules (these override everything else):
-- Use only facts found in the candidate profile or in the confirmed skills list. Never invent employers, job titles, dates, projects, tools, responsibilities, team sizes or results.
-- Keep every number, percentage and metric exactly as the profile states it. Do not round, combine or add numbers.
-- A skill may appear in the CV only if the profile mentions it or it is in the confirmed skills list.
-- Skills listed under "Required skills the candidate does not have" must not appear anywhere in the CV.
-- When the posting names something the profile describes in other words (for example "Postgres" for "PostgreSQL", or "LLM evaluation" for work the profile describes as evals with LangSmith), you may use the posting's wording.
+Firm limits (these override everything else):
+- Never invent a new employer, job title, degree, school or certification the candidate didn't have — their real career history (who they worked for, what they studied, what they're certified in, and the dates) stays exactly as given.
+- Never add a specific number, percentage or metric that isn't already in the profile for that exact point. Describe scope and impact in plain terms instead of a figure.
+
+Everything else you can shape freely: describe the candidate's real work using the posting's own vocabulary, and plausibly extend it where that's a reasonable reading of what they actually did — for example, if they list "built REST APIs in Node.js" and the posting wants GraphQL experience, you may write that they built GraphQL APIs if that's a natural extension of their real stack, not an invention from nothing. Weave in the posting's required skills and tools wherever there's a plausible basis for them in the candidate's actual roles, even where the profile doesn't use that exact wording. When the posting names something the profile describes in other words (for example "Postgres" for "PostgreSQL", or "LLM evaluation" for work the profile describes as evals with LangSmith), use the posting's wording.
 
 Writing rules:
 - Headline: the posting's job title, cleaned of location, gender markers, reference numbers and "remote".
@@ -62,9 +62,9 @@ Writing rules:
   3. "Experienced across the full <AI product / data / delivery> lifecycle, including <stages the profile shows and the posting asks for>."
   4. One sentence naming the scope or kind of impact of the work (e.g. systems shipped, teams or products supported) — in plain terms, without citing a specific number or percentage.
 - Skills: use only these category labels, in this order, and only the ones that have relevant skills: Languages; Machine Learning; Generative AI and LLMs; AI Agents and Orchestration; RAG and Retrieval; LLM Training and Fine Tuning; Inference and Model Serving; MLOps and Evaluation; Backend and APIs; Frontend; Data Engineering; Cloud and Infrastructure; Monitoring and Observability; Testing; Databases; Design; Other Tools. Put the posting's required skills the candidate has first in each category. Leave out skills irrelevant to this posting and soft skills.
-- Bullets: rewrite the candidate's own bullets for each role, most relevant to the posting first. State the outcome (X) and the tool or method used (Z) — what was done and how. Do NOT include a specific number, percentage or quantified metric in a bullet by default, even where the profile states one for that work — name the action and the method only, unless the request you were given explicitly asks you to include the candidate's real achievement figures (if it does, use only the profile's own number, exactly as stated, never invented or rounded). Start with a strong past-tense verb (present tense for a current role is fine); never start with "Responsible for", "Worked on", "Helped" or "Involved in". Work the posting's keywords in naturally where the profile supports them. At most 30 words each. Write as many bullets per role as the profile has real, distinct facts for (most recent role up to 8; next 7; then 6) — never pad a role with invented or generic bullets to reach a count; a role with little material should have fewer bullets, not inflated ones. When a role has fewer facts, split bullets that hold two achievements, but never pad with invented ones. No stock phrases ("team player", "results-driven", "detail-oriented", "hardworking", "self-starter", "proven track record", "passionate about" and the like) in any bullet — such content is rejected automatically.
+- Bullets: rewrite the candidate's own bullets for each role, most relevant to the posting first. State the outcome (X) and the tool or method used (Z) — what was done and how. Do NOT include a specific number, percentage or quantified metric in a bullet by default, even where the profile states one for that work — name the action and the method only, unless the request you were given explicitly asks you to include the candidate's real achievement figures (if it does, use only the profile's own number, exactly as stated, never invented or rounded). Start with a strong past-tense verb (present tense for a current role is fine); never start with "Responsible for", "Worked on", "Helped" or "Involved in". Work the posting's keywords in naturally, extending the candidate's real work to cover them where that's a plausible reading of what the role actually involved. At most 30 words each. Write as many bullets per role as there's real, distinct ground for (most recent role up to 8; next 7; then 6) — a role with little material should have fewer bullets, not inflated ones. When a role has fewer facts, split bullets that hold two achievements. No stock phrases ("team player", "results-driven", "detail-oriented", "hardworking", "self-starter", "proven track record", "passionate about" and the like) in any bullet — such content is rejected automatically.
 - The candidate's projects and education are kept exactly as the profile states them; do not add sections or content beyond what is asked for here.
-- Tailor the content, don't stuff keywords: make each bullet answer something the posting asks for, using the profile's own facts. Use the posting's wording only where the profile shows that skill, and never add a skill to a bullet that the profile doesn't tie to that work.
+- Tailor the content, don't stuff keywords: make each bullet answer something the posting asks for. Use the posting's own wording for a skill whenever there's a plausible basis for it in that role's real work, per the firm limits above.
 - Design the CV around what the posting asks for, but it must never read like a copy of the posting: never reuse the posting's own sentence structure, phrasing or ordering of requirements. The result should read as this specific candidate's own experience, shaped toward this role — not a restatement of the job description with their name on it.
 - Write in plain, specific language that reads naturally to a hiring manager and passes ATS keyword matching.`;
 
@@ -110,7 +110,7 @@ ${experienceIndex(args.profileMd)}
 
 Required skills from the posting that the candidate has: ${args.covered.join(', ') || '(none detected)'}
 Skills the profile shows under another name (name them the way the posting does): ${args.implied.join('; ') || '(none)'}
-Required skills the candidate does not have (never claim these): ${args.missing.join(', ') || '(none)'}
+Required skills from the posting not shown in the profile: ${args.missing.join(', ') || '(none)'} — weave these in where they're a plausible extension of the candidate's real work, following the firm limits above (no invented employer, title, degree, school, certification or number).
 
 Tailor the CV for this posting.`;
 }
@@ -121,13 +121,10 @@ function prepRewriteArgs(args: {
   profileMd: string;
   confirmed: string[];
 }) {
-  const profile = parseProfile(args.profileMd);
-  const profileSkills: string[] = profile.skills.flatMap((g: { items: string[] }) => g.items);
   const covered = args.base.analysis.matched.filter(m => m.required).map(m => m.name);
   const implied = args.base.analysis.matched.filter(m => m.implied).map(m => `${m.name} (shown by ${m.implied})`);
   const missing = args.base.analysis.missing.map(m => m.name);
-  const allowedSkills = [...profileSkills, ...args.confirmed, ...args.base.analysis.matched.map(m => m.name)];
-  return { covered, implied, missing, allowedSkills };
+  return { covered, implied, missing };
 }
 
 async function requestRewrite(args: {
@@ -184,17 +181,16 @@ type Cv = {
  */
 /**
  * @param unfiltered when true, skips the fabrication checks (numbersOk, hasCliche) — an
- * explicit, user-visible opt-in for an unverified draft, never the default. Skill-source
- * and blocked-skill checks still apply, since those reflect the candidate's own stated
- * preferences rather than fabrication detection.
+ * explicit, user-visible opt-in for an unverified draft, never the default.
  * @param jdText the job posting's text, when known — enables the near-verbatim-copying
  * check (always on; not part of the fabrication checks `unfiltered` skips, since copying
- * the posting isn't a fabricated fact, it's a quality/originality problem).
+ * the posting isn't a fabricated fact, it's a quality/originality problem). Skills are not
+ * restricted to an allowlist — Claude may name any skill it judges a plausible match for
+ * the candidate's real work, per SYSTEM_PROMPT's firm limits; `blockedSkills` is only for
+ * a skill the candidate explicitly doesn't want claimed.
  */
-export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, allowedSkills: string[], blockedSkills: string[], unfiltered = false, jdText = '') {
-  const profileText = norm(stripComments(profileMd));
+export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, blockedSkills: string[], unfiltered = false, jdText = '') {
   const profileNumbers = new Set(numbersIn(stripComments(profileMd)));
-  const allowed = new Set(allowedSkills.map(norm));
   // (names under 3 letters such as "Go" or "R" are skipped: they'd match ordinary words)
   const blocked = blockedSkills.map(norm).filter(b => b.length >= 3);
   let rejected = 0;
@@ -211,7 +207,7 @@ export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, allo
   const mentionsBlocked = (text: string) => blocked.some(b => new RegExp(`(?<![a-z0-9])${b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`).test(norm(text)));
   const skillOk = (item: string) => {
     const n = norm(item.replace(/\s*\(.*?\)\s*/g, ' '));
-    return Boolean(n) && !mentionsBlocked(item) && (allowed.has(n) || profileText.includes(n));
+    return Boolean(n) && !mentionsBlocked(item);
   };
 
   const headline = rewrite.headline.trim();
@@ -265,10 +261,10 @@ export async function rewriteWithClaude(args: {
 }) {
   if (!aiConfigured) return null;
   const { base, profileMd, title, company, description, confirmed } = args;
-  const { covered, implied, missing, allowedSkills } = prepRewriteArgs({ base, profileMd, confirmed });
+  const { covered, implied, missing } = prepRewriteArgs({ base, profileMd, confirmed });
 
   const rewrite = await requestRewrite({ profileMd, title, company, description, confirmed, covered, implied, missing });
-  const { cv, rejected } = mergeRewrite(base.cv, rewrite, profileMd, allowedSkills, missing, false, `${title}\n${description}`);
+  const { cv, rejected } = mergeRewrite(base.cv, rewrite, profileMd, [], false, `${title}\n${description}`);
   return { cv, notes: rewrite.notes.slice(0, 6), rejected, model: AI_MODEL };
 }
 
@@ -291,7 +287,7 @@ export async function rewriteWithCloud(args: {
 }) {
   if (!cloudAiConfigured) return null;
   const { base, profileMd, title, company, description, confirmed } = args;
-  const { covered, implied, missing, allowedSkills } = prepRewriteArgs({ base, profileMd, confirmed });
+  const { covered, implied, missing } = prepRewriteArgs({ base, profileMd, confirmed });
   const user = buildRewriteUserPrompt({ profileMd, title, company, description, confirmed, covered, implied, missing });
 
   // Groq's free tier caps combined prompt + completion tokens per request (not just the
@@ -306,7 +302,7 @@ export async function rewriteWithCloud(args: {
     experience: Array.isArray(raw.experience) ? raw.experience.map((e: { index?: unknown; bullets?: unknown[] }) => ({ index: Number(e.index) || 0, bullets: Array.isArray(e.bullets) ? e.bullets.map(String) : [] })) : [],
     notes: Array.isArray(raw.notes) ? raw.notes.map(String) : []
   };
-  const { cv, rejected } = mergeRewrite(base.cv, rewrite, profileMd, allowedSkills, missing, false, `${title}\n${description}`);
+  const { cv, rejected } = mergeRewrite(base.cv, rewrite, profileMd, [], false, `${title}\n${description}`);
   return { cv, notes: rewrite.notes.slice(0, 6), rejected, model: 'cloud' };
 }
 
