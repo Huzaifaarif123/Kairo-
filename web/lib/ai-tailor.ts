@@ -207,12 +207,12 @@ export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, bloc
   const mentionsBlocked = (text: string) => blocked.some(b => new RegExp(`(?<![a-z0-9])${b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`).test(norm(text)));
   const skillOk = (item: string) => {
     const n = norm(item.replace(/\s*\(.*?\)\s*/g, ' '));
-    return Boolean(n) && !mentionsBlocked(item);
+    return Boolean(n) && !mentionsBlocked(item) && notCopied(item);
   };
 
   const headline = rewrite.headline.trim();
   const out: Cv = { ...base };
-  if (headline && headline.length <= 80 && !mentionsBlocked(headline)) out.headline = headline;
+  if (headline && headline.length <= 80 && !mentionsBlocked(headline) && notCopied(headline)) out.headline = headline;
   else rejected++;
 
   const tagline = rewrite.tagline.map(s => s.trim()).filter(skillOk).slice(0, 8);

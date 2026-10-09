@@ -7,7 +7,7 @@
 // Gemini is tried first when configured (a notably more generous free-tier rate limit
 // than Groq's — see the comment on GEMINI_MODEL), then Groq/OpenRouter as the next tier,
 // mirroring the Claude -> cloud -> local-Ollama fallback one level up in the route.
-import { normalizeCV, validateWholeCvEdit } from './tailor.js';
+import { normalizeCV, validateWholeCvEdit, copiesJdText, hasCliche } from './tailor.js';
 
 const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 // gemini-3.5-flash-lite: verified live (2026-10-07) as the first model in this key's
@@ -145,7 +145,34 @@ export async function rewriteTailoredCv(cv, job) {
     const user = `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n<job_posting>\nTitle: ${job.title || ''}\nCompany: ${job.company || ''}\n${job.description || ''}\n</job_posting>`;
     const out = await chatJSON(TAILOR_REWRITE_PROMPT, user, 45_000, 6000);
     if (!out || !out.cv || typeof out.cv !== 'object' || !Object.keys(out.cv).length) return null;
-    return { cv: normalizeCV({ ...cv, ...out.cv }), changes: Array.isArray(out.changes) ? out.changes.map(String) : [] };
+    // The prompt tells the model never to copy the posting's own phrasing or use a stock
+    // resume cliché, but a model doesn't always follow that — enforced here per field
+    // (not just asked for), same quality gate web/lib/ai-tailor.ts's mergeRewrite applies.
+    // A field that fails falls back to the rule-based CV's own original for that field.
+    const jdText = `${job.title || ''}\n${job.description || ''}`;
+    const clean = (text) => typeof text === 'string' && text.trim() && !copiesJdText(text, jdText) && !hasCliche(text);
+    const fixed = { ...out.cv };
+    if ('summary' in fixed && !clean(fixed.summary)) delete fixed.summary;
+    if (Array.isArray(fixed.skills)) {
+      fixed.skills = fixed.skills
+        .map(g => ({ group: g.group, items: Array.isArray(g.items) ? g.items.filter(i => clean(typeof i === 'string' ? i : i && i.name)) : [] }))
+        .filter(g => g.group && g.items.length);
+    }
+    if (Array.isArray(fixed.experience)) {
+      fixed.experience = fixed.experience.map((job2, i) => {
+        const bullets = Array.isArray(job2.bullets) ? job2.bullets.filter(clean) : [];
+        const original = cv.experience[i];
+        return { ...job2, bullets: bullets.length ? bullets : (original ? original.bullets : job2.bullets) };
+      });
+    }
+    if (Array.isArray(fixed.projects)) {
+      fixed.projects = fixed.projects.map((p, i) => {
+        const bullets = Array.isArray(p.bullets) ? p.bullets.filter(clean) : [];
+        const original = cv.projects && cv.projects[i];
+        return { ...p, bullets: bullets.length ? bullets : (original ? original.bullets : p.bullets) };
+      });
+    }
+    return { cv: normalizeCV({ ...cv, ...fixed }), changes: Array.isArray(out.changes) ? out.changes.map(String) : [] };
   } catch (err) {
     console.error('Tailor rewrite failed:', err.message);
     return null;
