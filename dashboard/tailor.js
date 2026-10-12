@@ -214,6 +214,15 @@ function countMatches(re, text) {
   return (text.match(re) || []).length;
 }
 
+// Programming languages only — the LEXICON's own "Languages" category, not human
+// languages, which a plain word match on "language" would wrongly pull in.
+const LANGUAGE_TERMS = TERMS.filter(t => t.category === 'Languages');
+
+/** Whether a bullet names a programming language (Python, SQL, Go…). */
+function namesLanguage(text) {
+  return LANGUAGE_TERMS.some(t => countMatches(t.re, text) > 0);
+}
+
 // ----- Reading a posting -----
 //
 // Postings mix requirements with company intros, benefits and legal text. Each line is
@@ -872,6 +881,11 @@ export function tailorCV({ title = '', company = '', description = '', confirmed
     // ("achieving 90% test coverage"), after the relevant bullets
     const extra = ranked.filter(b => b.score === 0 && b.measured && !kept.includes(b)).slice(0, Math.max(0, Math.min(2, limit - kept.length)));
     kept = [...kept, ...extra];
+    // Language points lead: within a role, points naming a programming language are pinned
+    // above the rest, keeping their order inside each group. Selection above still decides
+    // which points survive — this only decides the order they are read in, so nothing is
+    // invented and nothing relevant is dropped to make room.
+    kept = [...kept.filter(b => namesLanguage(b.text)), ...kept.filter(b => !namesLanguage(b.text))];
     kept.forEach(b => demonstrates(b.text).forEach(n => shownInWork.add(n)));
     dropped += Math.max(0, job.bullets.length - kept.length);
     if (kept.some((b, n) => b.idx !== n)) reordered++;

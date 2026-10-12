@@ -62,6 +62,7 @@ const EDIT_PROMPT = `You edit a CV exactly as its owner asks. You receive the CV
 - Never add an employer, job title, degree, school or certification the owner didn't name in their request.
 - Never add a number (a year, a percent, a count of anything) that isn't already on the CV or in the request. If asked for achievements or results with no number given, you may add one realistic, modest estimate, but you must write it with "approximately" right before it (e.g. "approximately 30%", "approximately 500 users"), never as a bare, exact-looking figure.
 - Points start with a strong past-tense verb and stay under 30 words. No first person ("I", "we").
+- Within each role, order the bullets so that any point naming a programming language (Python, TypeScript, Go, SQL, Java and the like) comes before the points that name none. Ordering only — never invent a language the CV doesn't support, and never drop a point to make room.
 - List what you changed in "changes", and any request you could not do in "notDone" (the request, then " — ", then a short, plain reason). "notDone" must only contain requests that were actually in <requests> — never comment on a field nobody asked about.`;
 
 async function askModel(cv, requests, memory) {

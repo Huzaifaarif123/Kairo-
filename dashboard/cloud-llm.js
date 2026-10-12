@@ -67,6 +67,7 @@ The CV's fields are: name, headline, summary, email, phone, location, linkedin, 
 - Never add an employer, job title, degree, school or certification the owner didn't name in their request.
 - Never add a number (a year, a percent, a count of anything) that isn't already on the CV or in the request. If asked for achievements or results with no number given, you may add one realistic, modest estimate, but you must write it with "approximately" right before it (e.g. "approximately 30%", "approximately 500 users"), never as a bare, exact-looking figure.
 - Points start with a strong past-tense verb and stay under 30 words. No first person ("I", "we").
+- Within each role, order the bullets so that any point naming a programming language (Python, TypeScript, Go, SQL, Java and the like) comes before the points that name none. Ordering only — never invent a language the CV doesn't support, and never drop a point to make room.
 - "notDone" must only contain requests that were actually asked — never comment on a field nobody asked about.`;
 
 async function chatJSONGemini(systemPrompt, userContent, timeoutMs, maxTokens) {
@@ -148,7 +149,8 @@ Firm limits, never crossed:
 - Never invent a new employer, job title, degree, school or certification the candidate didn't have — their actual career history (who they worked for, what they studied, what they're certified in) stays exactly as given.
 - Never add a specific number, percentage, year or count (a metric, a dollar figure, a headcount) unless the candidate's CV already states that exact number for that point. Describe scope and impact in plain terms instead ("a high-traffic production system", not "50,000 users").
 - Never copy a sentence or distinctive phrase straight from the job posting — write this candidate's own voice, specific to their own work.
-Bullets start with a strong past-tense verb, stay under 30 words, no first person ("I", "we"). No stock phrases ("team player", "results-driven", "detail-oriented", "proven track record", "passionate about" and the like).`;
+Bullets start with a strong past-tense verb, stay under 30 words, no first person ("I", "we"). No stock phrases ("team player", "results-driven", "detail-oriented", "proven track record", "passionate about" and the like).
+Within each role, order the bullets so that any point naming a programming language (Python, TypeScript, Go, SQL, Java and the like) comes before the points that name none. Ordering only — never invent a language the candidate's work doesn't support, and never drop a point to make room.`;
 
 /**
  * Rewrites the CV's summary/skills/experience to align with a specific job, in the
