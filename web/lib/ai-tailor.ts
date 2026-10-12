@@ -342,6 +342,12 @@ const EDIT_PROMPT = `You edit a CV exactly as its owner asks. You receive the CV
 
 type EditableCv = z.infer<typeof EditSchema>['cv'];
 
+// Appended to the request on the one automatic retry below, when the first attempt
+// couldn't be trusted (validateWholeCvEdit rejected it) — spells out the likely cause so
+// the retry has a real chance to fix it, instead of the caller having to resend the exact
+// same request and watch it fail the exact same way a second time.
+const SELF_CORRECTION_NOTE = "(Your last attempt at this could not be used — it likely added something not already in the CV or clearly asked for here: an employer, school or certification that wasn't named, a number that wasn't already present or requested, or a phrase lifted straight from the job posting. Try again: only use facts already in the CV or stated in the request above, write it in your own original wording, and don't add a number unless one was already there or explicitly asked for.)";
+
 /** Claude applies requests the rules didn't understand. Returns null if its answer fails the checks. */
 /**
  * @param unfiltered when true, skips the honesty check (no new employer/school/cert or
@@ -350,20 +356,37 @@ type EditableCv = z.infer<typeof EditSchema>['cv'];
  * toggle, never the default), since without it the model can fabricate facts.
  */
 export async function editCvWithClaude(cv: EditableCv & Record<string, unknown>, requests: string[], unfiltered = false, jdText = '') {
-  const response = await getClient().beta.messages.parse({
-    model: AI_MODEL,
-    max_tokens: 16000,
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
-    output_config: { effort: 'medium', format: betaZodOutputFormat(EditSchema) },
-    system: EDIT_PROMPT,
-    messages: [{ role: 'user', content: `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n<requests>\n${requests.join('\n')}\n</requests>` }]
-  });
-  const out = response.parsed_output;
-  if (!out || response.stop_reason === 'refusal') return null;
+  const ask = async (reqs: string[]) => {
+    const response = await getClient().beta.messages.parse({
+      model: AI_MODEL,
+      max_tokens: 16000,
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
+      output_config: { effort: 'medium', format: betaZodOutputFormat(EditSchema) },
+      system: EDIT_PROMPT,
+      messages: [{ role: 'user', content: `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n<requests>\n${reqs.join('\n')}\n</requests>` }]
+    });
+    if (!response.parsed_output || response.stop_reason === 'refusal') return null;
+    return response.parsed_output;
+  };
+
+  let out = await ask(requests);
+  if (!out) return null;
+  const requestText = requests.join('\n');
   // Same honesty check as the local-model path: no new employer, school, certification
   // or unmarked number that wasn't in the CV or the request, and no verbatim JD copying.
-  if (!validateWholeCvEdit(cv, out.cv, requests.join('\n'), unfiltered, jdText)) return null;
+  let ok = validateWholeCvEdit(cv, out.cv, requestText, unfiltered, jdText);
+  // One automatic self-correcting retry when the first attempt couldn't be trusted: tell
+  // Claude specifically what's likely wrong and let it try again within this same call,
+  // rather than immediately failing and leaving the caller to resend the same request.
+  if (!ok) {
+    const retry = await ask([...requests, SELF_CORRECTION_NOTE]);
+    if (retry && validateWholeCvEdit(cv, retry.cv, requestText, unfiltered, jdText)) {
+      out = retry;
+      ok = true;
+    }
+  }
+  if (!ok) return null;
   return { cv: { ...cv, ...out.cv, projects: out.cv.projects.map(p => ({ ...p, desc: p.bullets.join(' ') })) }, changes: out.changes, notDone: out.notDone };
 }
 

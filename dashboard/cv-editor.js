@@ -580,6 +580,19 @@ async function cveAiApply(key, section, i, btn) {
     cveRender(ws, 0);
     return;
   }
+  // A genuine question ("what's missing for this job?") gets answered, not sent as an
+  // edit request — the same question/instruction split the main instruct box uses, so
+  // this box doesn't try to force some invented edit out of a question (the edit prompt's
+  // "always do the request, however vague" rule would otherwise have it hallucinate one).
+  if (typeof isInstructQuestion === 'function' && isInstructQuestion(text)) {
+    box.value = '';
+    const local = typeof answerInstructQuestion === 'function' ? answerInstructQuestion(text) : 'Thinking about this…';
+    done(`<div class="instruct-answer" data-q="${escapeHtml(text)}"><strong>${escapeHtml(text)}</strong><p>${local}</p></div>`);
+    if (typeof questionHasSpecificCategory === 'function' && !questionHasSpecificCategory(text)) {
+      fetchQuestionAnswers([text], ws.cv, ws.job());
+    }
+    return;
+  }
   btn.disabled = true;
   btn.textContent = 'Working…';
   ws.aiNotes[noteKey] = '<p class="instruct-wait">Working on it… requests in your own words can take up to a minute with the local AI.</p>';

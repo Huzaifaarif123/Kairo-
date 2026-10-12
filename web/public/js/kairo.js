@@ -2055,6 +2055,19 @@ async function cveAiApply(key, section, i, btn) {
     cveRender(ws, 0);
     return;
   }
+  // A genuine question ("what's missing for this job?") gets answered, not sent as an
+  // edit request — the same question/instruction split the main instruct box uses, so
+  // this box doesn't try to force some invented edit out of a question (the edit prompt's
+  // "always do the request, however vague" rule would otherwise have it hallucinate one).
+  if (typeof isInstructQuestion === 'function' && isInstructQuestion(text)) {
+    box.value = '';
+    const local = typeof answerInstructQuestion === 'function' ? answerInstructQuestion(text) : 'Thinking about this…';
+    done(`<div class="instruct-answer" data-q="${escapeHtml(text)}"><strong>${escapeHtml(text)}</strong><p>${local}</p></div>`);
+    if (typeof questionHasSpecificCategory === 'function' && !questionHasSpecificCategory(text)) {
+      fetchQuestionAnswers([text], ws.cv, ws.job());
+    }
+    return;
+  }
   btn.disabled = true;
   btn.textContent = 'Working…';
   ws.aiNotes[noteKey] = '<p class="instruct-wait">Working on it… requests in your own words can take up to a minute with the local AI.</p>';
@@ -2185,22 +2198,10 @@ async function applyInstruct(button) {
   if (questions.length && !changes.length) {
     box.value = '';
     setInstructResult(summaryNote + questions.map(q => `<div class="instruct-answer" data-q="${escapeHtml(q)}"><strong>${escapeHtml(q)}</strong><p>${answerInstructQuestion(q)}</p></div>`).join(''));
-    // A question outside the review's fixed categories gets a real, CV-grounded answer
-    // from AI in the background (if one is configured), replacing the generic recap
+    // A question outside the instant categories (score/gaps) gets a real, CV-grounded
+    // answer from AI in the background, replacing the "Thinking about this…" holding text
     const openEnded = questions.filter(q => !questionHasSpecificCategory(q));
-    if (openEnded.length && tailorWs.cv) {
-      fetch(apiUrl('/api/cv/ask'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(35_000),
-        body: JSON.stringify({ cv: tailorWs.cv, questions: openEnded, job: { title: document.getElementById('tailor-title').value.trim(), description: document.getElementById('tailor-desc').value.trim() } })
-      }).then(res => res.json()).then(data => {
-        for (const [q, answer] of Object.entries(data.answers || {})) {
-          const p = document.querySelector(`.instruct-answer[data-q="${CSS.escape(q)}"] p`);
-          if (p && answer) p.textContent = answer;
-        }
-      }).catch(() => {});
-    }
+    if (openEnded.length && tailorWs.cv) fetchQuestionAnswers(openEnded);
     return;
   }
   button.disabled = true;
@@ -2346,37 +2347,57 @@ function isInstructQuestion(line) {
   return /\?\s*$/.test(line) && !INSTRUCT_ACTION.test(line.split(/\s+/).slice(0, 3).join(' '));
 }
 
-// Whether answerInstructQuestion has a specific category for this question, rather than
-// its generic recap — when it doesn't, the question is also sent to AI (if configured)
-// for a real answer, since the generic recap isn't actually answering what was asked
+// Whether answerInstructQuestion has an instant, locally-computed answer for this
+// question — only score/match and skill gaps do, straight from tailorCV()'s own match
+// analysis (r.analysis/r.coverage), no AI call needed. Everything else (red flags,
+// length, general advice) has no local data source, so it always goes to AI (if
+// configured) for a real, CV-grounded answer instead of a canned non-answer.
 function questionHasSpecificCategory(q) {
   return /\b(score|match|rating|percent|%|how good|how strong|good enough|ready|chance|fit)\b/i.test(q)
-    || /\b(missing|gap|lack|need|require|skills?|keywords?)\b/i.test(q)
-    || /\b(red flags?|problems?|issues?|wrong|weak|bad)\b/i.test(q)
-    || /\b(long|length|pages?|short)\b/i.test(q)
-    || /\b(improve|better|stronger|tips?|suggest|advice|change|fix)\b/i.test(q);
+    || /\b(missing|gap|lack|need|require|skills?|keywords?)\b/i.test(q);
 }
 
-// An answer from this CV's review: score, gaps, red flags, what to improve, length
+// An instant answer from this CV's own match analysis (score, gaps); anything else shows
+// a holding message until the AI-grounded answer (see applyInstruct's openEnded fetch, or
+// cveAiApply's equivalent) replaces it in place.
 function answerInstructQuestion(q) {
   const r = tailorResult;
   if (!r) return 'Tailor a CV first, then ask again.';
-  if (!r.review) return "Score, red flags and skim questions aren't available anymore — that review feature was removed. Try asking me to add, remove or change something instead.";
-  const rv = r.review;
   const a = r.analysis;
   const list = (xs) => xs.map(x => escapeHtml(x)).join(', ');
   const missingReq = a.missing.filter(m => m.required && !m.soft).map(m => m.name);
   const missingNice = a.missing.filter(m => !m.required && !m.soft && !m.note).map(m => m.name);
-  const tips = (typeof instructTips === 'function' ? instructTips() : []).slice(0, 3).map(t => escapeHtml(t.text));
-  const score = `CV match <strong>${r.coverage ? r.coverage.cvScore : a.matchScore}%</strong>, recruiter score <strong>${escapeHtml(rv.recruiter.score)}/100</strong> (${rv.recruiter.parts.map(p => `${escapeHtml(p.label)} ${escapeHtml(p.points)}${p.of ? `/${p.of}` : ''}`).join(', ')}).`;
+  const score = `CV match <strong>${r.coverage ? r.coverage.cvScore : a.matchScore}%</strong> for this job.`;
   const gaps = missingReq.length ? `The job asks for ${list(missingReq)}, which your CV doesn't show.${missingNice.length ? ` Nice to have: ${list(missingNice)}.` : ''} If you have any of them, write e.g. "Add skills: ${escapeHtml(missingReq[0])}".` : `Nothing the job requires is missing.${missingNice.length ? ` Nice to have: ${list(missingNice)}.` : ''}`;
-  const flags = rv.recruiter.redFlags.length ? rv.recruiter.redFlags.map(f => `${escapeHtml(f.title)}: ${escapeHtml(f.detail)}`).join(' ') : 'No red flags a recruiter would spot in 10 seconds.';
   if (/\b(score|match|rating|percent|%|how good|how strong|good enough|ready|chance|fit)\b/i.test(q)) return `${score} ${missingReq.length ? gaps : ''}`;
   if (/\b(missing|gap|lack|need|require|skills?|keywords?)\b/i.test(q)) return gaps;
-  if (/\b(red flags?|problems?|issues?|wrong|weak|bad)\b/i.test(q)) return flags;
-  if (/\b(long|length|pages?|short)\b/i.test(q)) return `About ${escapeHtml(rv.skim.pages)} page${rv.skim.pages > 1 ? 's' : ''}. Write "Make it one page" to shorten it.`;
-  if (/\b(improve|better|stronger|tips?|suggest|advice|change|fix)\b/i.test(q)) return tips.length ? `Top things to do: ${tips.map((t, i) => `${i + 1}. ${t}`).join(' ')}` : 'It already looks strong for this job.';
-  return `${score} ${gaps} ${tips.length ? `Next: ${tips[0]}` : ''}`;
+  return 'Thinking about this…';
+}
+
+// Shared by the main instruct box and the per-section "Ask AI to change X" boxes in Edit
+// CV: fills in a real, CV-grounded answer for each question in `questions` next to its
+// "Thinking about this…" placeholder, found by its `data-q` attribute. If no AI answered
+// (none configured, or the call failed) the placeholder is replaced with a clear reason
+// instead of being left stuck forever.
+function fetchQuestionAnswers(questions, cv = tailorWs.cv, job = { title: document.getElementById('tailor-title').value.trim(), description: document.getElementById('tailor-desc').value.trim() }) {
+  fetch(apiUrl('/api/cv/ask'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(35_000),
+    body: JSON.stringify({ cv, questions, job })
+  }).then(res => res.json()).then(data => {
+    for (const q of questions) {
+      const p = document.querySelector(`.instruct-answer[data-q="${CSS.escape(q)}"] p`);
+      if (!p) continue;
+      const answer = data.answers && data.answers[q];
+      p.textContent = answer || "I can't answer that one yet — add an AI key (Gemini, Groq, OpenRouter or Anthropic), or ask about your match score or missing skills instead.";
+    }
+  }).catch(() => {
+    for (const q of questions) {
+      const p = document.querySelector(`.instruct-answer[data-q="${CSS.escape(q)}"] p`);
+      if (p) p.textContent = "Couldn't reach the server to answer that — try again.";
+    }
+  });
 }
 
 // "Generate (a generic / new / profile) summary (for this JD)", "write my summary for this job"

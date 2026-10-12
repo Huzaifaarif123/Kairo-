@@ -210,6 +210,12 @@ export async function stripBulletNumbers(bullets) {
   }
 }
 
+// Appended to the request on the one automatic retry below, when the model's first
+// attempt couldn't be trusted (validateWholeCvEdit rejected it) — spells out the likely
+// cause so the retry has a real chance to fix it, instead of the user having to retype
+// the exact same request and watch it fail the exact same way a second time.
+const SELF_CORRECTION_NOTE = '(Your last attempt at this could not be used — it likely added something not already in the CV or clearly asked for here: an employer, school or certification that wasn\'t named, a number that wasn\'t already present or requested, or a phrase lifted straight from the job posting. Try again: only use facts already in the CV or stated in the request above, write it in your own original wording, and don\'t add a number unless one was already there or explicitly asked for.)';
+
 /**
  * The cloud model's pass over requests the rules didn't understand. Changes `result`
  * in place like applyWithLocalModel, but — unlike it — returns whether the call
@@ -241,14 +247,36 @@ export async function applyWithCloudModel(result, unfiltered = false, jdText = '
     }
     return false;
   }
+  let touchedCv = out && out.cv && typeof out.cv === 'object';
+  let merged = touchedCv ? { ...result.cv, ...out.cv } : null;
+  let ok = touchedCv && validateWholeCvEdit(result.cv, merged, requestText, unfiltered, jdText);
+  let retried = false;
+  // One automatic self-correcting retry when the first attempt couldn't be trusted: tell
+  // the model specifically what's likely wrong and let it try again within this same
+  // request, rather than immediately handing the user a dead end they'd have to retype.
+  if (touchedCv && !ok) {
+    retried = true;
+    try {
+      const retry = await askCloud(result.cv, [...result.pending, SELF_CORRECTION_NOTE]);
+      const retryTouched = retry && retry.cv && typeof retry.cv === 'object';
+      if (retryTouched) {
+        const retryMerged = { ...result.cv, ...retry.cv };
+        if (validateWholeCvEdit(result.cv, retryMerged, requestText, unfiltered, jdText)) {
+          out = retry;
+          merged = retryMerged;
+          ok = true;
+        }
+      }
+    } catch (err) {
+      console.error('Self-correcting retry failed:', err.message);
+    }
+  }
   const notDone = (Array.isArray(out && out.notDone) ? out.notDone.map(String) : [])
     .filter(n => result.pending.some(p => n.startsWith(p) || p.toLowerCase().includes(n.split(' — ')[0].toLowerCase().slice(0, 20))));
-  const touchedCv = out && out.cv && typeof out.cv === 'object';
-  if (touchedCv) out.cv = { ...result.cv, ...out.cv };
   if (!touchedCv) {
     result.pending = notDone.length ? notDone : [fallback('nothing to change.')];
-  } else if (validateWholeCvEdit(result.cv, out.cv, requestText, unfiltered, jdText)) {
-    const normalized = normalizeCV(out.cv);
+  } else if (ok) {
+    const normalized = normalizeCV(merged);
     if (JSON.stringify(normalized) === JSON.stringify(normalizeCV(result.cv))) {
       result.pending = [fallback("I couldn't make that change.")];
     } else {
@@ -261,7 +289,7 @@ export async function applyWithCloudModel(result, unfiltered = false, jdText = '
       result.pending = notDone;
     }
   } else {
-    result.pending = [fallback('that change couldn\'t be made safely (it would have added something not in your request), try rephrasing it.')];
+    result.pending = [fallback(`that change couldn't be made safely${retried ? ', even after trying again,' : ''} (it would have added something not in your request) — try rephrasing it with more specific detail.`)];
   }
   result.unclear = result.pending;
   // The call itself succeeded (a reply came back and was handled) even when the
