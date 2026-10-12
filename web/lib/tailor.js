@@ -214,6 +214,15 @@ function countMatches(re, text) {
   return (text.match(re) || []).length;
 }
 
+// Programming languages only — the LEXICON's own "Languages" category, not human
+// languages, which a plain word match on "language" would wrongly pull in.
+const LANGUAGE_TERMS = TERMS.filter(t => t.category === 'Languages');
+
+/** Whether a bullet names a programming language (Python, SQL, Go…). */
+function namesLanguage(text) {
+  return LANGUAGE_TERMS.some(t => countMatches(t.re, text) > 0);
+}
+
 // ----- Reading a posting -----
 //
 // Postings mix requirements with company intros, benefits and legal text. Each line is
@@ -571,6 +580,12 @@ function cleanJobTitle(title) {
     .replace(/\bREF#?\s*\d+\b/gi, '')
     .replace(/[-–|,(]\s*(100%\s*)?(fully\s*)?remote\b.*$/i, '')
     .replace(/\bremote\b/gi, '')
+    // Boards tack the advert's own id or listing counter onto the title ("… Engineer-3",
+    // "… Engineer #4821", "… Engineer (2)"). That numbers the posting, not the job, and
+    // reads as a typo on a CV. A separator is required before the digits, so real levels
+    // survive untouched ("Engineer II", "Engineer Level 3", "Web3 Engineer").
+    .replace(/\s*[-–—#]\s*\d{1,6}\s*$/, '')
+    .replace(/\s*[([]\s*\d{1,6}\s*[)\]]\s*$/, '')
     .replace(/[\s\-–|,:]+$/g, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
@@ -664,7 +679,10 @@ function taglineFor(focus, importance) {
     const related = picked.some(p => same(p, t) || same(t, p));
     if (related) continue;
     picked.push(t);
-    if (picked.length === 8) break;
+    // Six, not eight: the line sits under the name at ~9pt and eight terms overran it,
+    // wrapping onto a second line that reads as a glitch rather than a headline. The six
+    // most important terms still carry the posting's core stack.
+    if (picked.length === 6) break;
   }
   return picked.map(t => TAGLINE_LABEL[t.name] || t.name);
 }
@@ -801,6 +819,21 @@ function atLeastFive(bullets, target = MIN_POINTS) {
 }
 // Skills that don't relate to the posting: at most this many per group
 const OTHER_SKILLS_PER_GROUP = 2;
+// And a ceiling on the group as a whole. A posting heavy in one area (a cloud role, say)
+// marks every tool in that category relevant, and the row then runs past the page margin
+// as one unreadable wall. The most relevant survive; the tail is what gets cut.
+const MAX_SKILLS_PER_GROUP = 10;
+
+/**
+ * "AWS (Lambda, EC2, S3, RDS, ALB, IAM, CloudWatch)" -> "AWS". A parenthetical listing
+ * three or more sub-services is a catalogue rather than the skill's name, and one of them
+ * can run a skills row past the margin on its own. Two or fewer are left alone, since
+ * those read as part of the name ("C# (.NET)", "Spark (PySpark, Scala)").
+ */
+function trimSkillDetail(name) {
+  const text = String(name || '');
+  return text.replace(/\s*\([^()]*,[^()]*,[^()]*\)\s*$/, '').trim() || text;
+}
 const MAX_PROJECTS = 4;
 
 /**
@@ -872,6 +905,11 @@ export function tailorCV({ title = '', company = '', description = '', confirmed
     // ("achieving 90% test coverage"), after the relevant bullets
     const extra = ranked.filter(b => b.score === 0 && b.measured && !kept.includes(b)).slice(0, Math.max(0, Math.min(2, limit - kept.length)));
     kept = [...kept, ...extra];
+    // Language points lead: within a role, points naming a programming language are pinned
+    // above the rest, keeping their order inside each group. Selection above still decides
+    // which points survive — this only decides the order they are read in, so nothing is
+    // invented and nothing relevant is dropped to make room.
+    kept = [...kept.filter(b => namesLanguage(b.text)), ...kept.filter(b => !namesLanguage(b.text))];
     kept.forEach(b => demonstrates(b.text).forEach(n => shownInWork.add(n)));
     dropped += Math.max(0, job.bullets.length - kept.length);
     if (kept.some((b, n) => b.idx !== n)) reordered++;
@@ -926,7 +964,7 @@ export function tailorCV({ title = '', company = '', description = '', confirmed
     const rated = list.map(i => ({ ...i, rel: i.matched ? 2 : relevance(i.name) > 0 ? 1 : 0 }));
     const relevant = rated.filter(i => i.rel > 0).sort((a, b) => b.rel - a.rel || a.idx - b.idx);
     const others = rated.filter(i => i.rel === 0).slice(0, OTHER_SKILLS_PER_GROUP);
-    const items = [...relevant, ...others].map(({ name, matched }) => ({ name: capitalise(name), matched }));
+    const items = [...relevant, ...others].slice(0, MAX_SKILLS_PER_GROUP).map(({ name, matched }) => ({ name: capitalise(trimSkillDetail(name)), matched }));
     return { group, items, score: relevant.reduce((n, i) => n + i.rel, 0) };
   }).filter((g, _, all) => g.score > 0 || g.group === 'Languages' || all.filter(x => x.score > 0).length < 3)
     // The template's fixed order: Languages first … Databases near the end

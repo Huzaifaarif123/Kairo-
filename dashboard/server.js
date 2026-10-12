@@ -6,9 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { tailorCV, saveTailoredCV, renderTailoredCV, profileToCV, applyInstructions, scopeCV, scopeText, mergeScoped, hasMeasure } from './tailor.js';
 import { applyWithLocalModel, localModelReady } from './local-llm.js';
-import { cloudAiConfigured, applyWithCloudModel, answerQuestions, stripBulletNumbers, rewriteTailoredCv } from './cloud-llm.js';
+import { cloudAiConfigured, cloudAiDescription, applyWithCloudModel, answerQuestions, stripBulletNumbers, rewriteTailoredCv } from './cloud-llm.js';
 import { compileLatexWithRetry, LatexCompileError } from './latex-compile.js';
 import { resolveProfile, listProfiles, profileDetails, usesOriginalOwner, readProfileMarkdown, writeProfileMarkdown, evaluateAgainstProfile } from './profiles.js';
+import { correctionsPath, correctionsBlock, listCorrections, recordCorrection, deleteCorrection, SCOPES } from './corrections.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -256,7 +257,9 @@ const server = http.createServer(async (req, res) => {
         let answers = {};
         if (questions.length && cloudAiConfigured) {
           const job = data.job && typeof data.job === 'object' ? data.job : null;
-          answers = await answerQuestions(data.cv, job, questions);
+          // Anything the owner has already corrected about a question like this one
+          const memory = correctionsBlock(correctionsPath(profile), questions.join('\n'), 'ask');
+          answers = await answerQuestions(data.cv, job, questions, memory);
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ answers }));
@@ -294,11 +297,12 @@ const server = http.createServer(async (req, res) => {
         if (result.pending.length > 0 && cloudAiConfigured) {
           const pendingBefore = [...result.pending];
           const unclearBefore = [...result.unclear];
-          cloud = await applyWithCloudModel(result, unfiltered, jdText);
+          const memory = correctionsBlock(correctionsPath(profile), result.pending.join('\n'), 'edit');
+          cloud = await applyWithCloudModel(result, unfiltered, jdText, memory);
           if (!cloud) { result.pending = pendingBefore; result.unclear = unclearBefore; }
         }
         const local = !cloud && result.pending.length > 0 && await localModelReady();
-        if (local) await applyWithLocalModel(result, unfiltered, jdText);
+        if (local) await applyWithLocalModel(result, unfiltered, jdText, correctionsBlock(correctionsPath(profile), result.pending.join('\n'), 'edit'));
         if (sc) result.cv = mergeScoped(data.cv, result.cv, sc);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ...result, ai: cloud || local, unfiltered: unfiltered && (cloud || local) }));
@@ -307,6 +311,47 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: err.message }));
       }
     });
+    return;
+  }
+
+  // ---------- Corrections memory ----------
+
+  // "Fix this answer": the owner's own correction to a wrong AI reply, stored per profile
+  // (corrections.js) and fed back into later prompts for requests like it. GET lists what's
+  // stored, DELETE drops one — the undo behind a correction saved by mistake.
+  if (pathname === '/api/corrections' && req.method === 'GET') {
+    const scope = parsedUrl.searchParams.get('scope');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(listCorrections(correctionsPath(profile), SCOPES.includes(scope) ? scope : null)));
+    return;
+  }
+
+  if (pathname === '/api/corrections' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; if (body.length > 100000) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body || '{}');
+        const saved = recordCorrection(correctionsPath(profile), {
+          scope: data.scope,
+          prompt: data.prompt,
+          badAnswer: data.badAnswer,
+          corrected: data.corrected
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(saved));
+      } catch (err) {
+        res.writeHead(err.status || 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  if (pathname === '/api/corrections' && req.method === 'DELETE') {
+    const id = parsedUrl.searchParams.get('id') || '';
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ removed: Boolean(id) && deleteCorrection(correctionsPath(profile), id) }));
     return;
   }
 
@@ -781,4 +826,13 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`AI Job Search Dashboard running at http://localhost:${PORT}`);
+  // Say plainly whether a key was picked up. Without this, a key that didn't take (wrong
+  // file, typo'd variable, quotes around the value) is indistinguishable from a broken AI
+  // until the first request comes back unanswered.
+  if (cloudAiConfigured) {
+    console.log(`AI: ${cloudAiDescription}`);
+  } else {
+    console.log('AI: off — no key found. Put one in web/.env.local (see web/env.local.example) and restart.');
+    console.log('     Everything else works without it: job search, CV tailoring, the tracker and the fit evaluator.');
+  }
 });

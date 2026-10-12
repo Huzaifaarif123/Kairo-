@@ -225,6 +225,22 @@ jobs:
           fi
         working-directory: .agents/skills/${{ matrix.tool }}/cli
 
+  dashboard-tests:
+    name: Dashboard engine tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      # Plain Node, no install step: the dashboard has no npm dependencies, and both
+      # suites are self-contained (the corrections one writes only to a temp dir).
+      # Deliberately offline - neither suite calls a model, so CI needs no API key.
+      - name: CV tailoring engine (accuracy and honesty gates)
+        run: node dashboard/tailor.test.js
+      - name: Corrections memory (storage, retrieval, prompt injection)
+        run: node dashboard/corrections.test.js
+
   placeholder-integrity:
     name: Placeholder integrity (upstream template only)
     if: github.repository == 'MadsLorentzen/ai-job-search'

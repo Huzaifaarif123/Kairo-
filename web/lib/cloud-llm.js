@@ -31,6 +31,27 @@ const PROVIDER = GROQ_KEY
 /** Whether any cloud model (Gemini, Groq or OpenRouter) is configured. */
 export const cloudAiConfigured = Boolean(GEMINI_KEY || PROVIDER);
 
+/**
+ * Which cloud model the next request will actually use, for the line the server prints on
+ * startup. A key pasted into web/.env.local is otherwise silent until the first AI request
+ * fails, which is a slow and confusing way to find out it didn't take — a typo'd variable
+ * name or a key on the wrong line reads exactly like "the AI is broken".
+ */
+export const cloudAiDescription = GEMINI_KEY
+  ? `Gemini (${GEMINI_MODEL})${PROVIDER ? `, falling back to ${PROVIDER.url.includes('groq') ? 'Groq' : 'OpenRouter'}` : ''}`
+  : PROVIDER
+    ? `${PROVIDER.url.includes('groq') ? 'Groq' : 'OpenRouter'} (${PROVIDER.model})`
+    : '';
+
+/**
+ * Appends this request's corrections memory (see corrections.js) to a system prompt. The
+ * owner's past corrections go last, after the standing rules, so they read as the most
+ * recent and most specific instruction on the point they cover. An empty memory — no
+ * stored correction close enough to this request, which is the normal case — returns the
+ * prompt completely untouched, so a request without one is byte-for-byte what it always was.
+ */
+const withMemory = (prompt, memory) => (memory ? `${prompt}\n\n${memory}` : prompt);
+
 const EDIT_PROMPT = `You edit a CV exactly as its owner asks. You receive the CV as JSON and their requests.
 Reply with ONLY a JSON object, no other text, shaped exactly like this:
 {"cv": { <only the top-level CV fields you changed> }, "changes": [ <short plain-English descriptions of what you changed> ], "notDone": [ <any request you could not do, as "<the request> — <short reason>"> ]}
@@ -46,6 +67,7 @@ The CV's fields are: name, headline, summary, email, phone, location, linkedin, 
 - Never add an employer, job title, degree, school or certification the owner didn't name in their request.
 - Never add a number (a year, a percent, a count of anything) that isn't already on the CV or in the request. If asked for achievements or results with no number given, you may add one realistic, modest estimate, but you must write it with "approximately" right before it (e.g. "approximately 30%", "approximately 500 users"), never as a bare, exact-looking figure.
 - Points start with a strong past-tense verb and stay under 30 words. No first person ("I", "we").
+- Within each role, order the bullets so that any point naming a programming language (Python, TypeScript, Go, SQL, Java and the like) comes before the points that name none. Ordering only — never invent a language the CV doesn't support, and never drop a point to make room.
 - "notDone" must only contain requests that were actually asked — never comment on a field nobody asked about.`;
 
 async function chatJSONGemini(systemPrompt, userContent, timeoutMs, maxTokens) {
@@ -114,8 +136,8 @@ export async function chatJSON(systemPrompt, userContent, timeoutMs = 60_000, ma
   return chatJSONOpenAICompatible(systemPrompt, userContent, timeoutMs, maxTokens);
 }
 
-async function askCloud(cv, requests) {
-  return chatJSON(EDIT_PROMPT, `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n<requests>\n${requests.join('\n')}\n</requests>`);
+async function askCloud(cv, requests, memory) {
+  return chatJSON(withMemory(EDIT_PROMPT, memory), `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n<requests>\n${requests.join('\n')}\n</requests>`);
 }
 
 const TAILOR_REWRITE_PROMPT = `You rewrite a candidate's CV to align it closely with one specific job description. You receive the CV as JSON and the job posting. Reply with ONLY a JSON object:
@@ -127,7 +149,8 @@ Firm limits, never crossed:
 - Never invent a new employer, job title, degree, school or certification the candidate didn't have — their actual career history (who they worked for, what they studied, what they're certified in) stays exactly as given.
 - Never add a specific number, percentage, year or count (a metric, a dollar figure, a headcount) unless the candidate's CV already states that exact number for that point. Describe scope and impact in plain terms instead ("a high-traffic production system", not "50,000 users").
 - Never copy a sentence or distinctive phrase straight from the job posting — write this candidate's own voice, specific to their own work.
-Bullets start with a strong past-tense verb, stay under 30 words, no first person ("I", "we"). No stock phrases ("team player", "results-driven", "detail-oriented", "proven track record", "passionate about" and the like).`;
+Bullets start with a strong past-tense verb, stay under 30 words, no first person ("I", "we"). No stock phrases ("team player", "results-driven", "detail-oriented", "proven track record", "passionate about" and the like).
+Within each role, order the bullets so that any point naming a programming language (Python, TypeScript, Go, SQL, Java and the like) comes before the points that name none. Ordering only — never invent a language the candidate's work doesn't support, and never drop a point to make room.`;
 
 /**
  * Rewrites the CV's summary/skills/experience to align with a specific job, in the
@@ -182,9 +205,9 @@ export async function rewriteTailoredCv(cv, job) {
 const ASK_PROMPT = `You answer questions about a CV, honestly and specifically, using only what's in the CV JSON you're given (and the job posting, if one is given). Reply with ONLY a JSON object: {"answers": {"<question, exactly as asked>": "<a short, specific, plain-English answer, 1-3 sentences>"}}. One entry per question. Never invent facts not in the CV; if something truly can't be answered from the CV, say so plainly in the answer rather than guessing.`;
 
 /** A short, specific answer for each question, grounded only in the CV (and job, if given). */
-export async function answerQuestions(cv, job, questions) {
+export async function answerQuestions(cv, job, questions, memory = '') {
   const user = `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n${job && (job.title || job.description) ? `<job_posting>\nTitle: ${job.title || ''}\n${job.description || ''}\n</job_posting>\n\n` : ''}<questions>\n${questions.join('\n')}\n</questions>`;
-  const out = await chatJSON(ASK_PROMPT, user, 30_000, 2000);
+  const out = await chatJSON(withMemory(ASK_PROMPT, memory), user, 30_000, 2000);
   return out && typeof out.answers === 'object' && out.answers ? out.answers : {};
 }
 
@@ -227,15 +250,17 @@ const SELF_CORRECTION_NOTE = '(Your last attempt at this could not be used — i
  * otherwise fabricate facts: invented technologies, numbers, even employers).
  * @param {string} [jdText] the job posting's text, so the honesty check can also catch
  * the model copying it verbatim.
+ * @param {string} [memory] this request's corrections memory (corrections.js), appended
+ * to the system prompt so an edit the owner has already corrected once comes back right.
  */
-export async function applyWithCloudModel(result, unfiltered = false, jdText = '') {
+export async function applyWithCloudModel(result, unfiltered = false, jdText = '', memory = '') {
   if (!result.pending.length) return true;
   const requestText = result.pending.join('\n');
   const originalMessage = result.unclear.find(u => u.startsWith(requestText));
   const fallback = (reason) => originalMessage || `${requestText} — ${reason}`;
   let out;
   try {
-    out = await askCloud(result.cv, result.pending);
+    out = await askCloud(result.cv, result.pending, memory);
   } catch (err) {
     console.error('Cloud model failed:', err.message);
     // A free-tier rate limit is common under quick back-to-back requests — say so
@@ -257,7 +282,7 @@ export async function applyWithCloudModel(result, unfiltered = false, jdText = '
   if (touchedCv && !ok) {
     retried = true;
     try {
-      const retry = await askCloud(result.cv, [...result.pending, SELF_CORRECTION_NOTE]);
+      const retry = await askCloud(result.cv, [...result.pending, SELF_CORRECTION_NOTE], memory);
       const retryTouched = retry && retry.cv && typeof retry.cv === 'object';
       if (retryTouched) {
         const retryMerged = { ...result.cv, ...retry.cv };

@@ -62,9 +62,10 @@ const EDIT_PROMPT = `You edit a CV exactly as its owner asks. You receive the CV
 - Never add an employer, job title, degree, school or certification the owner didn't name in their request.
 - Never add a number (a year, a percent, a count of anything) that isn't already on the CV or in the request. If asked for achievements or results with no number given, you may add one realistic, modest estimate, but you must write it with "approximately" right before it (e.g. "approximately 30%", "approximately 500 users"), never as a bare, exact-looking figure.
 - Points start with a strong past-tense verb and stay under 30 words. No first person ("I", "we").
+- Within each role, order the bullets so that any point naming a programming language (Python, TypeScript, Go, SQL, Java and the like) comes before the points that name none. Ordering only — never invent a language the CV doesn't support, and never drop a point to make room.
 - List what you changed in "changes", and any request you could not do in "notDone" (the request, then " — ", then a short, plain reason). "notDone" must only contain requests that were actually in <requests> — never comment on a field nobody asked about.`;
 
-async function askModel(cv, requests) {
+async function askModel(cv, requests, memory) {
   const res = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: 'POST',
     // Capped well under the old 240s: on a RAM-constrained machine a slow local
@@ -82,7 +83,7 @@ async function askModel(cv, requests) {
       options: { temperature: 1, num_ctx: 8192 },
       format: REPLY_SHAPE,
       messages: [
-        { role: 'system', content: EDIT_PROMPT },
+        { role: 'system', content: memory ? `${EDIT_PROMPT}\n\n${memory}` : EDIT_PROMPT },
         { role: 'user', content: `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n<requests>\n${requests.join('\n')}\n</requests>` }
       ]
     })
@@ -105,8 +106,11 @@ const SELF_CORRECTION_NOTE = '(Your last attempt at this could not be used — i
  * user-visible opt-in for an unverified draft, never the default.
  * @param {string} [jdText] the job posting's text, so the honesty check can also catch
  * the model copying it verbatim.
+ * @param {string} [memory] this request's corrections memory (corrections.js). Passed
+ * here as well as to the cloud model so a correction the owner has already made keeps
+ * working when the cloud tier is rate-limited and the request falls through to Ollama.
  */
-export async function applyWithLocalModel(result, unfiltered = false, jdText = '') {
+export async function applyWithLocalModel(result, unfiltered = false, jdText = '', memory = '') {
   if (!result.pending.length) return result;
   const requestText = result.pending.join('\n');
   // The rule engine's own message for this request (if it had something specific to say,
@@ -116,7 +120,7 @@ export async function applyWithLocalModel(result, unfiltered = false, jdText = '
   const fallback = (reason) => originalMessage || `${requestText} — ${reason}`;
   let out;
   try {
-    out = await askModel(result.cv, result.pending);
+    out = await askModel(result.cv, result.pending, memory);
   } catch (err) {
     console.error('Local model failed:', err.message);
     return result;
@@ -134,7 +138,7 @@ export async function applyWithLocalModel(result, unfiltered = false, jdText = '
   if (touchedCv && !ok) {
     retried = true;
     try {
-      const retry = await askModel(result.cv, [...result.pending, SELF_CORRECTION_NOTE]);
+      const retry = await askModel(result.cv, [...result.pending, SELF_CORRECTION_NOTE], memory);
       const retryTouched = retry && retry.cv && typeof retry.cv === 'object';
       if (retryTouched) {
         const retryMerged = { ...result.cv, ...retry.cv };
