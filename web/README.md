@@ -39,4 +39,12 @@ should show `"storage":"postgres","database":"connected"`. "Save to cv/" only wo
 - Live job search calls Freehire's public API and LinkedIn's public job pages directly
   (ported from `.agents/skills/*-search`), so no Bun is needed. LinkedIn may block
   requests from cloud servers; Freehire is unaffected.
+
+- **LinkedIn from a cloud server.** That block is real and measurable: the same query
+  returned 35 LinkedIn results locally and 1 on the deployed site. The other six free
+  boards are unaffected, so a deployed search returns roughly half of what a local one
+  does. Setting `APIFY_TOKEN` adds LinkedIn through Apify's residential proxies, plus
+  Indeed and Glassdoor, which have no free API. It is entirely optional and billed per
+  run; with no token the seven free boards behave exactly as before. See the Apify
+  section of `web/env.local.example` for the actor ids and limits.
 - The site has no login: anyone with the URL can view and edit profiles and pipelines.

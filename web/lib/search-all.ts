@@ -7,6 +7,7 @@
 
 import { searchFreehire, searchLinkedIn, type SearchParams } from './jobs';
 import { REMOTE_SOURCES, searchRemoteBoard, titleScore, norm, type RemoteSource } from './remote-boards';
+import { APIFY_SOURCES, enabledApifySources, searchApifyBoard, isApifySource } from './apify';
 import { vetJobs } from './job-quality';
 
 // Each board's own site: its postings link there, which is expected
@@ -35,6 +36,9 @@ export function vetBoardResults<T extends { title?: string | null; company?: str
 const PER_BOARD_TIMEOUT_MS = 25000;
 // LinkedIn opens each posting to confirm it's remote, so it gets longer (and the most results)
 const LINKEDIN_TIMEOUT_MS = 45000;
+// Apify is given the longest wait of all: its runs include container start-up. Kept under
+// the search route's maxDuration of 60s so the response still has time to be assembled.
+const APIFY_TIMEOUT_MS = Number(process.env.APIFY_TIMEOUT_S || 40) * 1000 + 5000;
 // Ask each board for more than we show: the "posted within" and quality checks remove some
 const PER_BOARD_FETCH = 30;
 const PER_BOARD_LIMIT = 20;
@@ -58,6 +62,14 @@ const BOARDS: Board[] = [
     portal: key,
     label: REMOTE_SOURCES[key],
     run: (p: SearchParams) => searchRemoteBoard(key, p)
+  })),
+  // Only present when APIFY_TOKEN is set: LinkedIn through residential proxies (the direct
+  // scraper above is throttled to near-nothing from a datacenter IP), plus Indeed and
+  // Glassdoor, which have no free API. Billed per run, hence opt-in.
+  ...enabledApifySources().map(key => ({
+    portal: key as string,
+    label: APIFY_SOURCES[key],
+    run: (p: SearchParams) => searchApifyBoard(key, p)
   }))
 ];
 
@@ -82,7 +94,10 @@ export async function searchAllBoards(params: SearchParams): Promise<{ results: 
   const settled = await Promise.allSettled(BOARDS.map(b => {
     const isLinkedIn = b.portal === 'linkedin';
     const perBoard = { ...params, limit: isLinkedIn ? LINKEDIN_LIMIT : PER_BOARD_FETCH };
-    return withTimeout(b.run(perBoard), isLinkedIn ? LINKEDIN_TIMEOUT_MS : PER_BOARD_TIMEOUT_MS, b.label);
+    // An Apify run starts a container and scrapes before it answers, so it needs longer
+    // than an API call — but still inside the route's own 60s ceiling.
+    const ms = isApifySource(b.portal) ? APIFY_TIMEOUT_MS : isLinkedIn ? LINKEDIN_TIMEOUT_MS : PER_BOARD_TIMEOUT_MS;
+    return withTimeout(b.run(perBoard), ms, b.label);
   }));
 
   const boards: BoardStatus[] = [];
