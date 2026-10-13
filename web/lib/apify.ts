@@ -43,13 +43,33 @@ const ENV_KEY: Record<ApifySource, string> = {
   'apify-alljobs': 'ALLJOBS'
 };
 
-// Verified on the Apify store. all-jobs-scraper covers Indeed plus the ATS boards
-// (Greenhouse, Lever, Ashby and the rest of its 42 platforms) in one run, which is why
-// there is no separate Indeed actor here.
+// Verified against a real account. Timings measured on the free plan, searching
+// "Senior Data Engineer":
+//
+//   bebity~linkedin-jobs-scraper   ~23s, succeeds — on by default
+//   agentx~linkedin-jobs-scraper   33s / 48s / >55s across three runs — too variable
+//   agentx~glassdoor-jobs-scraper  >55s, times out — off by default
+//   agentx~all-jobs-scraper        >55s, times out — off by default
+//
+// bebity is the default because it is both the fastest and the only one that finished
+// every time. AgentX's LinkedIn actor succeeded twice and timed out once on identical
+// input, and a source that drops out at random is worse than one that is simply absent.
+//
+// These actors start a container before they scrape, so they take tens of seconds whatever
+// max_results is set to — dropping it from 50 to 10 changed nothing. The search route's
+// ceiling is 60s (maxDuration) and boards run in parallel, so the search costs the slowest
+// board: with all three on it measured 56.0s, close enough to 60 that the whole search
+// would fail rather than just one board. Only the one that fits is on by default.
+//
+// To enable the others, set their id below AND give the route more room than Vercel's 60s
+// — or move Apify off the request path entirely (start the run, store its id, collect the
+// results afterwards), which is the real fix for actors this slow.
+// all-jobs-scraper covers Indeed plus the ATS boards (Greenhouse, Lever, Ashby and the
+// rest of its 42 platforms) in one run, which is why there is no separate Indeed actor.
 const ACTORS: Record<ApifySource, string> = {
-  'apify-linkedin': process.env.APIFY_LINKEDIN_ACTOR ?? 'agentx~linkedin-jobs-scraper',
-  'apify-glassdoor': process.env.APIFY_GLASSDOOR_ACTOR ?? 'agentx~glassdoor-jobs-scraper',
-  'apify-alljobs': process.env.APIFY_ALLJOBS_ACTOR ?? 'agentx~all-jobs-scraper'
+  'apify-linkedin': process.env.APIFY_LINKEDIN_ACTOR ?? 'bebity~linkedin-jobs-scraper',
+  'apify-glassdoor': process.env.APIFY_GLASSDOOR_ACTOR ?? '',
+  'apify-alljobs': process.env.APIFY_ALLJOBS_ACTOR ?? ''
 };
 
 /**
@@ -82,9 +102,10 @@ const MAX_ITEMS = Number(process.env.APIFY_MAX_ITEMS || 50);
 // Runs cost money, so a repeated search reuses the previous one for far longer than the
 // free boards' cache
 const CACHE_TTL = Number(process.env.APIFY_CACHE_MINUTES || 60) * 60 * 1000;
-// The AgentX actors require a country and take a code, not a region name. The app's own
+// The AgentX actors require a country, and it must be the full English name from their
+// own list ("United States", not "us" or "USA" — a code is refused outright). The app's own
 // locations are regions ("Worldwide", "EMEA"), so there is nothing to derive it from.
-const COUNTRY = process.env.APIFY_COUNTRY || 'us';
+const COUNTRY = process.env.APIFY_COUNTRY || 'United States';
 
 const REGIONS = ['Worldwide', 'EMEA', 'Americas', 'APAC', 'Remote'];
 
@@ -154,7 +175,11 @@ const pick = (row: Record<string, unknown>, ...keys: string[]): string | null =>
 /** One dataset row turned into the shape every other board returns. */
 function toJob(source: ApifySource, row: Record<string, unknown>, i: number): BoardJob | null {
   const title = pick(row, 'title', 'jobTitle', 'job_title', 'positionName', 'position', 'name');
-  const url = pick(row, 'url', 'jobUrl', 'job_url', 'link', 'applyUrl', 'apply_url', 'jobLink', 'detailsUrl');
+  // platform_url first: it is the posting on the board that was searched. official_url is
+  // the employer's own listing, which is a fine fallback but is sometimes missing or a
+  // careers-page root rather than this job. (AgentX's actors return both and neither of
+  // the names every other scraper uses, which is why they lead the list.)
+  const url = pick(row, 'platform_url', 'url', 'jobUrl', 'job_url', 'link', 'applyUrl', 'apply_url', 'jobLink', 'detailsUrl', 'official_url');
   // A row with no title, or nowhere to apply, is not a usable posting
   if (!title || !url) return null;
 
@@ -166,7 +191,7 @@ function toJob(source: ApifySource, row: Record<string, unknown>, i: number): Bo
     title,
     company: pick(row, 'companyName', 'company_name', 'company', 'employer', 'organization'),
     location: pick(row, 'location', 'jobLocation', 'job_location', 'formattedLocation', 'place') || 'Remote',
-    date: pick(row, 'postedAt', 'posted_at', 'publishedAt', 'published_at', 'postingDateParsed', 'datePosted', 'date_posted', 'date'),
+    date: pick(row, 'posted_date', 'postedAt', 'posted_at', 'publishedAt', 'published_at', 'postingDateParsed', 'datePosted', 'date_posted', 'date'),
     url,
     work_mode: pick(row, 'workplaceType', 'workMode', 'work_mode', 'remote'),
     skills: Array.isArray(skillsRaw) ? skillsRaw.map(s => String(s)).filter(Boolean).slice(0, 8) : [],
@@ -195,7 +220,17 @@ async function runActor(source: ApifySource, params: SearchParams): Promise<Reco
     const detail = body.slice(0, 200).replace(/\s+/g, ' ');
     if (res.status === 401 || res.status === 403) throw new Error(`Apify rejected the token (${res.status})`);
     if (res.status === 404) throw new Error(`Apify actor "${actor}" not found — check APIFY_${ENV_KEY[source]}_ACTOR`);
-    if (res.status === 400) throw new Error(`Apify actor "${actor}" rejected the input — set APIFY_${ENV_KEY[source]}_DIALECT or _INPUT${detail ? `: ${detail}` : ''}`);
+    // A 400 covers two very different problems and they need different fixes, so the
+    // message must tell them apart: an input the actor's schema refuses, versus a run that
+    // started fine and ran out of time. Reporting a timeout as bad input sends you editing
+    // settings that were never wrong.
+    if (res.status === 400 && /invalid-input/.test(body)) {
+      throw new Error(`Apify actor "${actor}" refused the input — set APIFY_${ENV_KEY[source]}_DIALECT or _INPUT${detail ? `: ${detail}` : ''}`);
+    }
+    if (res.status === 400 && /TIMED-OUT|timed out/i.test(body)) {
+      throw new Error(`Apify actor "${actor}" ran out of time (${RUN_TIMEOUT_S}s). It needs longer than a single request can wait — see APIFY_TIMEOUT_S.`);
+    }
+    if (res.status === 400) throw new Error(`Apify actor "${actor}" did not finish${detail ? `: ${detail}` : ''}`);
     throw new Error(`Apify ${actor} failed (${res.status})${detail ? `: ${detail}` : ''}`);
   }
 
