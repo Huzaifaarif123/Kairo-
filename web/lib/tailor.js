@@ -2182,6 +2182,36 @@ function editNumbers(s) {
 const toWords = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
 
 /**
+ * The technologies named in `text` that the candidate's own CV never mentions.
+ *
+ * The backstop for the failure the prompts could not prevent on their own: a model reads
+ * "Kubernetes" in the posting and works it into a bullet about work that never touched it.
+ * A posting naming a tool is not evidence the candidate has used it, so a generated bullet
+ * may only name a technology that appears somewhere in the candidate's own source.
+ *
+ * Deliberately narrow, because the blunt version of this check does real damage. It tests
+ * only names in the LEXICON — a curated list of technologies — so ordinary words the
+ * posting and the CV naturally share ("designed", "platform", "data") are never touched,
+ * and a term is supported by appearing anywhere in the source, not just in the same role.
+ * Matching is by each term's own regex, so word boundaries and the awkward names ("Go",
+ * "C#", "R") behave as they do everywhere else.
+ *
+ * @param text one generated line — a bullet, a summary, a skill
+ * @param sourceText the candidate's own CV/profile, as the text to be supported by
+ * @returns the unsupported technology names, in LEXICON spelling ([] when all are grounded)
+ */
+export function unsupportedSkills(text, sourceText) {
+  const line = String(text || '');
+  const source = String(sourceText || '');
+  if (!line.trim() || !source.trim()) return [];
+  const out = [];
+  for (const t of TERMS) {
+    if (countMatches(t.re, line) > 0 && countMatches(t.re, source) === 0) out.push(t.name);
+  }
+  return [...new Set(out)];
+}
+
+/**
  * Whether `text` contains a 6-word sequence copied straight from the job posting — the
  * deterministic backstop for "never copy JD phrasing" (the prompts already say this, but a
  * prompt is advisory; this is enforced). A 6-word match is specific enough that it can't be

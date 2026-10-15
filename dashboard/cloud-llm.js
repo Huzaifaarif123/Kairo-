@@ -7,7 +7,7 @@
 // Gemini is tried first when configured (a notably more generous free-tier rate limit
 // than Groq's — see the comment on GEMINI_MODEL), then Groq/OpenRouter as the next tier,
 // mirroring the Claude -> cloud -> local-Ollama fallback one level up in the route.
-import { normalizeCV, validateWholeCvEdit, copiesJdText, hasCliche } from './tailor.js';
+import { normalizeCV, validateWholeCvEdit, copiesJdText, hasCliche, unsupportedSkills } from './tailor.js';
 
 const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 // gemini-3.5-flash-lite: verified live (2026-10-07) as the first model in this key's
@@ -144,10 +144,26 @@ const TAILOR_REWRITE_PROMPT = `You rewrite a candidate's CV to align it closely 
 {"cv": {"summary": "...", "skills": [{"group": "...", "items": ["..."]}], "experience": [{"role": "...", "company": "...", "period": "...", "location": "...", "bullets": ["..."]}], "projects": [...]}, "changes": [<short plain-English descriptions of what you changed, 3-8 items>]}
 Only include the top-level fields you're actually rewriting; include every job in "experience" (all of them, not just the ones you changed) if you touch any of them, same for "skills".
 
-Rewrite the summary, skills and experience bullets so they speak directly to what this job description is asking for — don't just lightly reorder the candidate's own words. You may describe the candidate's real work using the job posting's own vocabulary and plausibly extend it where that's a reasonable reading of what they actually did (e.g. if they list "built REST APIs in Node.js" and the posting wants GraphQL experience, you may write that they built GraphQL APIs if that reads as a natural extension of their real stack, not a fabrication from nothing). Weave in the posting's required skills and tools wherever there's a plausible basis for them in the candidate's actual roles.
+Where the facts come from, and this ranking settles every conflict:
+1. The CV you are given is the only record of what this candidate has done. Every claim you write must be supported by something in it.
+2. The job posting tells you what the employer wants and what words they use for it. It is NEVER evidence about the candidate. A tool named in the posting does not mean the candidate has used it; a responsibility listed there does not mean they have held it.
+3. Where the CV gives you no support for something the posting asks for, leave it out. A shorter, true CV beats a fuller, invented one — and an interview exposes the difference.
+
+Work this out before you write, and keep it to yourself (return only the JSON):
+- what the role is really for, and the handful of requirements that matter most;
+- for each of those, what in this CV genuinely speaks to it;
+- which are fully supported, which only partly, and which not at all.
+Then rewrite so the supported ones lead and are stated in the clearest, most relevant terms the CV's own facts allow.
+
+Rewrite properly — reordering the candidate's own words is not tailoring. Say what they actually did, in sharper and more relevant language, using the posting's vocabulary ONLY where it genuinely names the same thing (the posting's "Postgres" for the CV's "PostgreSQL" is the same thing; the posting's "Kubernetes" for a CV that only mentions Docker is not).
+
 Firm limits, never crossed:
+- Never name a technology, tool, framework, language or platform in a bullet unless that CV already names it. Adjacent is not the same: REST APIs are not GraphQL, Docker is not Kubernetes, a database is not a specific one. If the CV doesn't name it, you don't either.
+- Never turn one of the posting's requirements into something the candidate did. Reading "optimise SQL queries and build ETL workflows" in the posting, next to "created sales dashboards using SQL Server and SSIS" in the CV, the honest rewrite is "Built sales dashboards in SQL Server and SSIS to support sales reporting and analysis" — NOT "Developed ETL workflows, transformed business data and optimised SQL queries", which quietly awards the candidate the employer's whole wish list.
 - Never invent a new employer, job title, degree, school or certification the candidate didn't have — their actual career history (who they worked for, what they studied, what they're certified in) stays exactly as given.
-- Never add a specific number, percentage, year or count (a metric, a dollar figure, a headcount) unless the candidate's CV already states that exact number for that point. Describe scope and impact in plain terms instead ("a high-traffic production system", not "50,000 users").
+- Never add a specific number, percentage, year or count (a metric, a dollar figure, a headcount) unless the candidate's CV already states that exact number for that point. A posting asking for "measurable impact" is not permission to supply one: describe scope in plain terms instead ("a high-traffic production system", not "50,000 users"), or write a plain responsibility bullet.
+- Never build a bullet by stringing the posting's keywords together. Every bullet is one real piece of work, and a reader who knows the job should recognise it as a thing someone actually did.
+- Never change what a piece of the candidate's experience actually means in order to make it fit better.
 - Never copy a sentence or distinctive phrase straight from the job posting — write this candidate's own voice, specific to their own work.
 Bullets start with a strong past-tense verb, stay under 30 words, no first person ("I", "we"). No stock phrases ("team player", "results-driven", "detail-oriented", "proven track record", "passionate about" and the like).
 Within each role, order the bullets so that any point naming a programming language (Python, TypeScript, Go, SQL, Java and the like) comes before the points that name none. Ordering only — never invent a language the candidate's work doesn't support, and never drop a point to make room.`;
@@ -173,7 +189,13 @@ export async function rewriteTailoredCv(cv, job) {
     // (not just asked for), same quality gate web/lib/ai-tailor.ts's mergeRewrite applies.
     // A field that fails falls back to the rule-based CV's own original for that field.
     const jdText = `${job.title || ''}\n${job.description || ''}`;
-    const clean = (text) => typeof text === 'string' && text.trim() && !copiesJdText(text, jdText) && !hasCliche(text);
+    // Everything the candidate's own CV says, as the evidence a generated line is held to.
+    // A technology that appears nowhere in here was not theirs to claim: the prompt now
+    // forbids it, but a prompt is advisory and this is the part that actually holds.
+    const evidence = JSON.stringify(cv);
+    const clean = (text) => typeof text === 'string' && text.trim()
+      && !copiesJdText(text, jdText) && !hasCliche(text)
+      && unsupportedSkills(text, evidence).length === 0;
     const fixed = { ...out.cv };
     if ('summary' in fixed && !clean(fixed.summary)) delete fixed.summary;
     if (Array.isArray(fixed.skills)) {

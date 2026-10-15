@@ -3,7 +3,8 @@
 // the project): `node dashboard/tailor.test.js`. Exits non-zero on any failure, so it can
 // be wired into CI as-is.
 import {
-  tailorCV, applyInstructions, validateWholeCvEdit, copiesJdText, hasDuplicateLines, hasCliche
+  tailorCV, applyInstructions, validateWholeCvEdit, copiesJdText, hasDuplicateLines, hasCliche,
+  unsupportedSkills
 } from './tailor.js';
 
 let pass = 0, fail = 0;
@@ -119,6 +120,53 @@ function ok(label, cond) { cond ? pass++ : (fail++, console.log(`FAIL ${label}`)
   const job = { title: 'Cloud Engineer', description: 'Requirements:\n- AWS\n- Terraform' };
   const r = applyInstructions(JSON.parse(JSON.stringify(cv)), 'add some certifications', { job, unfiltered: true });
   ok('Certifications prioritize the JD requirements, not the CV\'s existing (unrelated) skills', r.cv.certifications.some(c => /AWS|Terraform/i.test(c)));
+}
+
+// ---------- Grounding: a technology named in a generated line must exist in the CV ----------
+//
+// The backstop for the failure the prompt could not prevent on its own: the model reads a
+// tool in the posting and works it into a bullet about work that never touched it. These
+// cover both directions — it must catch the invented tool, and it must not touch anything
+// the candidate really has, or it would quietly delete true bullets.
+{
+  const cvText = JSON.stringify({
+    experience: [{ role: 'Data Analyst', company: 'Brightloop',
+      bullets: ['Built sales dashboards using SQL Server and SSIS.', 'Containerised the reporting jobs with Docker.'] }],
+    skills: [{ group: 'Languages', items: ['SQL', 'Python'] }]
+  });
+
+  // Test 3: the JD asks for Kubernetes and AWS; the CV evidences neither
+  eq('Grounding: flags a technology the CV never mentions',
+    unsupportedSkills('Ran production workloads on Kubernetes across AWS.', cvText).sort(), ['AWS', 'Kubernetes']);
+
+  // Test 6 / no-false-positives: everything named is in the CV, so nothing is flagged
+  eq('Grounding: passes a line whose tools are all in the CV',
+    unsupportedSkills('Built sales dashboards in SQL Server and SSIS.', cvText), []);
+  eq('Grounding: Docker is evidenced, so it is not flagged',
+    unsupportedSkills('Containerised the reporting pipeline with Docker.', cvText), []);
+
+  // The check must be narrow. A blunt "reject any word shared with the JD" rule would
+  // strip ordinary English and make the CV worse, so plain prose is never flagged.
+  eq('Grounding: ordinary words are never treated as skills',
+    unsupportedSkills('Designed and delivered reporting for the business teams.', cvText), []);
+
+  // Adjacent is not the same — the specific case the old prompt explicitly permitted
+  eq('Grounding: REST experience does not license a GraphQL claim',
+    unsupportedSkills('Built GraphQL APIs for client platforms.',
+      JSON.stringify({ experience: [{ bullets: ['Built REST APIs in Node.js.'] }] })), ['GraphQL']);
+
+  // Test 4: partially relevant experience must not be upgraded to the specific tool
+  eq('Grounding: generic data processing does not license a Spark claim',
+    unsupportedSkills('Processed large datasets with Apache Spark.',
+      JSON.stringify({ experience: [{ bullets: ['Processed large CSV datasets for analytics.'] }] })), ['Spark']);
+
+  // Evidence is CV-wide, not per-role: a tool proven in one job is not an invention in another
+  ok('Grounding: evidence anywhere in the CV counts',
+    unsupportedSkills('Automated deployments with Docker.', cvText).length === 0);
+
+  // Degenerate input must not produce false accusations
+  eq('Grounding: empty source flags nothing', unsupportedSkills('Shipped with Kubernetes.', ''), []);
+  eq('Grounding: empty line flags nothing', unsupportedSkills('', cvText), []);
 }
 
 console.log(`\n${pass} passed, ${fail} failing`);
