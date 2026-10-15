@@ -2,9 +2,10 @@
 //
 // The rule-based engine (tailor.js) first works out which requirements the candidate
 // covers and picks the most relevant content. Claude then rewrites the headline,
-// summary, skills and bullets to speak directly to the posting — it can describe the
-// candidate's real work in the posting's own vocabulary and plausibly extend it, not
-// just rearrange what the rule-based pass already picked out verbatim.
+// summary, skills and bullets to speak directly to the posting — restating the
+// candidate's real work in the posting's own vocabulary where that names the same thing,
+// not just rearranging what the rule-based pass already picked out verbatim. What the
+// posting asks for and the profile cannot support is left out, never extended to cover.
 //
 // Everything Claude returns is still checked before it's used: the candidate's real
 // career facts (employers, titles, companies, dates, degrees, schools, certifications)

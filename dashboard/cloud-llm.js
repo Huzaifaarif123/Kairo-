@@ -171,9 +171,10 @@ Within each role, order the bullets so that any point naming a programming langu
 /**
  * Rewrites the CV's summary/skills/experience to align with a specific job, in the
  * cloud model's own words — not limited to only what the rule-based tailorCV() already
- * picked out verbatim from the profile; it can describe the candidate's real work using
- * the job posting's vocabulary and plausibly extend it (see TAILOR_REWRITE_PROMPT for the
- * firm limits: no invented employer/title/degree/school/cert, no invented number). Called
+ * picked out verbatim from the profile; it restates the candidate's real work in sharper,
+ * more relevant language, using the posting's vocabulary only where that names the same
+ * thing (see TAILOR_REWRITE_PROMPT for the firm limits: no technology the CV doesn't
+ * name, no requirement turned into an achievement, no invented employer or number). Called
  * on the main "Tailor my CV" button, after the deterministic pass. Never blocks the
  * tailor: returns null on any failure or when no cloud model is configured, and the
  * caller falls back to the rule-based result.
