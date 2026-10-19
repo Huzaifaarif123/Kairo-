@@ -70,7 +70,7 @@ The CV's fields are: name, headline, summary, email, phone, location, linkedin, 
 - Within each role, order the bullets so that any point naming a programming language (Python, TypeScript, Go, SQL, Java and the like) comes before the points that name none. Ordering only — never invent a language the CV doesn't support, and never drop a point to make room.
 - "notDone" must only contain requests that were actually asked — never comment on a field nobody asked about.`;
 
-async function chatJSONGemini(systemPrompt, userContent, timeoutMs, maxTokens) {
+async function chatJSONGemini(systemPrompt, userContent, timeoutMs, maxTokens, temperature) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_KEY}`;
   const res = await fetch(url, {
     method: 'POST',
@@ -79,7 +79,7 @@ async function chatJSONGemini(systemPrompt, userContent, timeoutMs, maxTokens) {
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: [{ parts: [{ text: userContent }] }],
-      generationConfig: { temperature: 1, responseMimeType: 'application/json', maxOutputTokens: maxTokens }
+      generationConfig: { temperature, responseMimeType: 'application/json', maxOutputTokens: maxTokens }
     })
   });
   if (!res.ok) throw new Error(`Gemini error: ${res.status} ${await res.text().catch(() => '')}`);
@@ -90,14 +90,14 @@ async function chatJSONGemini(systemPrompt, userContent, timeoutMs, maxTokens) {
   return JSON.parse((part && part.text) || '{}');
 }
 
-async function chatJSONOpenAICompatible(systemPrompt, userContent, timeoutMs, maxTokens) {
+async function chatJSONOpenAICompatible(systemPrompt, userContent, timeoutMs, maxTokens, temperature) {
   const res = await fetch(PROVIDER.url, {
     method: 'POST',
     signal: AbortSignal.timeout(timeoutMs),
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${PROVIDER.key}` },
     body: JSON.stringify({
       model: PROVIDER.model,
-      temperature: 1,
+      temperature,
       // reasoning models (e.g. Groq's gpt-oss) spend a chunk of this budget thinking
       // before the JSON itself, so a full CV rewrite needs real headroom or the reply
       // gets cut off mid-JSON and fails to parse
@@ -123,17 +123,20 @@ async function chatJSONOpenAICompatible(systemPrompt, userContent, timeoutMs, ma
  * set, that's tried next before giving up — the same "don't let one backend's outage
  * take down the whole fallback tier" principle as the cloud -> local-Ollama handoff one
  * level up.
+ *
+ * `temperature` defaults to 1, which suits the open-ended calls. A task that should give
+ * the same answer twice passes it lower — see TAILOR_TEMPERATURE.
  */
-export async function chatJSON(systemPrompt, userContent, timeoutMs = 60_000, maxTokens = 8000) {
+export async function chatJSON(systemPrompt, userContent, timeoutMs = 60_000, maxTokens = 8000, temperature = 1) {
   if (GEMINI_KEY) {
     try {
-      return await chatJSONGemini(systemPrompt, userContent, timeoutMs, maxTokens);
+      return await chatJSONGemini(systemPrompt, userContent, timeoutMs, maxTokens, temperature);
     } catch (err) {
       console.error('Gemini failed:', err.message);
       if (!PROVIDER) throw err;
     }
   }
-  return chatJSONOpenAICompatible(systemPrompt, userContent, timeoutMs, maxTokens);
+  return chatJSONOpenAICompatible(systemPrompt, userContent, timeoutMs, maxTokens, temperature);
 }
 
 async function askCloud(cv, requests, memory) {
@@ -165,6 +168,7 @@ Firm limits, never crossed:
 - Never build a bullet by stringing the posting's keywords together. Every bullet is one real piece of work, and a reader who knows the job should recognise it as a thing someone actually did.
 - Never change what a piece of the candidate's experience actually means in order to make it fit better.
 - Never copy a sentence or distinctive phrase straight from the job posting — write this candidate's own voice, specific to their own work.
+Return every bullet you were given for every role — all of them, rewritten. Dropping bullets is not tailoring, it is losing the candidate's experience: a role that arrives with five bullets leaves with five. Only ever merge two if they genuinely describe one piece of work.
 Bullets start with a strong past-tense verb, stay under 30 words, no first person ("I", "we"). No stock phrases ("team player", "results-driven", "detail-oriented", "proven track record", "passionate about" and the like).
 Within each role, order the bullets so that any point naming a programming language (Python, TypeScript, Go, SQL, Java and the like) comes before the points that name none. Ordering only — never invent a language the candidate's work doesn't support, and never drop a point to make room.`;
 
@@ -183,7 +187,47 @@ export async function rewriteTailoredCv(cv, job) {
   if (!cloudAiConfigured) return null;
   try {
     const user = `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n<job_posting>\nTitle: ${job.title || ''}\nCompany: ${job.company || ''}\n${job.description || ''}\n</job_posting>`;
-    const out = await chatJSON(TAILOR_REWRITE_PROMPT, user, 45_000, 6000);
+
+    // Measured over seven runs on one real profile and posting, this model answered the
+    // same request with anything from 0% to 89% of the bullets handed straight back
+    // unchanged — the "it didn't tailor the experience section" report. Asking harder in
+    // the prompt doesn't fix a model that is simply inconsistent, so the echo is measured
+    // and a bad draw is re-rolled, the same "enforce it, don't request it" approach as the
+    // fabrication checks below.
+    const echoRate = (rewritten) => {
+      const before = new Set((cv.experience || []).flatMap(x => x.bullets || []).map(bulletKey));
+      const after = (rewritten.experience || []).flatMap(x => x.bullets || []).map(bulletKey);
+      if (!after.length || !before.size) return 0;
+      return after.filter(b => before.has(b)).length / after.length;
+    };
+
+    // Two ways this model wastes an attempt, both seen on repeated runs of one real
+    // profile: it hands most of the bullets back unchanged, or it emits JSON that doesn't
+    // parse (malformed mid-object, not a token cut-off — that throws its own error). Both
+    // end as an untailored CV, so both are worth one more draw rather than one.
+    //
+    // The whole thing is on a clock. The Next.js tailor route is capped at 60s
+    // (maxDuration), so the second attempt only runs if there is time for it; out of
+    // budget, the first result stands. A mediocre rewrite beats a failed request.
+    const deadline = Date.now() + TAILOR_BUDGET_MS;
+    const remaining = () => deadline - Date.now();
+    const attempt = (extra) => chatJSON(
+      extra ? `${TAILOR_REWRITE_PROMPT}\n\n${extra}` : TAILOR_REWRITE_PROMPT,
+      user, Math.max(5_000, Math.min(ATTEMPT_TIMEOUT_MS, remaining())), 8000, TAILOR_TEMPERATURE
+    ).catch((err) => { console.error('Tailor attempt failed:', err.message); return null; });
+
+    // Keep drawing while the budget allows and the draw is unusable. Three attempts is
+    // where this stopped paying: one bad draw in six survived two attempts on the measured
+    // profile, and the budget usually has room for a third.
+    let out = null;
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      if (i && remaining() < MIN_RETRY_MS) break;
+      const draw = await attempt(i ? ECHO_RETRY_NUDGE : null);
+      // Keep whichever draw rewrote the most — a later attempt that failed or echoed
+      // harder never displaces a better earlier one.
+      if (draw && draw.cv && (!out || !out.cv || echoRate(draw.cv) < echoRate(out.cv))) out = draw;
+      if (out && out.cv && echoRate(out.cv) <= MAX_ECHO) break;
+    }
     if (!out || !out.cv || typeof out.cv !== 'object' || !Object.keys(out.cv).length) return null;
     // The prompt tells the model never to copy the posting's own phrasing or use a stock
     // resume cliché, but a model doesn't always follow that — enforced here per field
@@ -224,6 +268,32 @@ export async function rewriteTailoredCv(cv, job) {
     return null;
   }
 }
+
+// Tailoring should give the same CV for the same inputs, so it runs well below the
+// default of 1. Measured across repeated runs, the default was the main source of the
+// swing between a properly rewritten experience section and one handed straight back.
+const TAILOR_TEMPERATURE = Number(process.env.TAILOR_TEMPERATURE || 0.3);
+
+// Above this share of bullets returned unchanged, the rewrite is treated as a non-answer
+// and re-rolled. Not zero: a bullet that is already the sharpest true statement of that
+// work for this posting should come back as it was, and some roles have only one or two.
+const MAX_ECHO = Number(process.env.MAX_ECHO || 0.6);
+
+// The whole rewrite, both attempts included, has to fit inside the Next.js tailor route's
+// 60s maxDuration with room for the response to be rendered after it.
+const TAILOR_BUDGET_MS = Number(process.env.TAILOR_BUDGET_MS || 50_000);
+// No single attempt may eat the whole budget and leave nothing for a second.
+const ATTEMPT_TIMEOUT_MS = 28_000;
+// Below this there isn't time for a second attempt to return, so the first result stands.
+const MIN_RETRY_MS = 12_000;
+// Draws per tailor. Measured: one draw in six was still unusable after two.
+const MAX_ATTEMPTS = Number(process.env.TAILOR_MAX_ATTEMPTS || 3);
+
+// Appended only on the retry, naming what went wrong with the first attempt.
+const ECHO_RETRY_NUDGE = `Your previous attempt handed most of the bullets back unchanged. That is not a tailored CV. Rewrite every bullet: lead with the part of it this posting cares about, name the tool or method the CV already names, say what the work produced, and drop the part irrelevant to this role. Keep every bullet — rewritten, not removed — and stay inside the firm limits.`;
+
+/** A bullet reduced to its words, for comparing two versions of the same CV. */
+const bulletKey = (b) => String(b || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
 const ASK_PROMPT = `You answer questions about a CV, honestly and specifically, using only what's in the CV JSON you're given (and the job posting, if one is given). Reply with ONLY a JSON object: {"answers": {"<question, exactly as asked>": "<a short, specific, plain-English answer, 1-3 sentences>"}}. One entry per question. Never invent facts not in the CV; if something truly can't be answered from the CV, say so plainly in the answer rather than guessing.`;
 
