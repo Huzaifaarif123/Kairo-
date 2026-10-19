@@ -3007,6 +3007,59 @@ function visibleSections(layoutId, styles) {
 }
 
 /**
+ * A quality gate for the experience section's bullets, scoped to just that section —
+ * three of the checks that used to drive the whole-CV Recruiter Review card (XYZ formula,
+ * red flags, ATS skim), repurposed as a pass/fail gate on AI-written bullets rather than a
+ * user-facing score. Returns short, specific issues meant to be fed back to the AI for one
+ * corrective retry (see rewriteTailoredCv in cloud-llm.js) — this is never shown to the
+ * user as a standalone review, and the whole-CV checks that don't make sense scoped to
+ * just experience (contact info, degree level, overall page count, summary wording) are
+ * deliberately left out.
+ *
+ * Deliberately does NOT flag a bullet for lacking a measured result (the "Y" of XYZ) —
+ * only the action-verb ("X") and relevance/length/cliché checks are enforced. Making a
+ * missing number a failure here would make the retry try to invent one to pass the gate,
+ * which is exactly the auto-fabricated-numbers behavior this project spent a long time
+ * removing; numbers are only ever added when explicitly asked for, elsewhere in the flow.
+ * @param {any[]} experience the CV's experience array (bullets as strings)
+ * @param {{ name: string, required?: boolean }[]} [matched] posting requirements the
+ * candidate covers (from tailorCV's analysis.matched) — used only for the ATS-skim check
+ * @returns {{ ok: boolean, issues: string[] }}
+ */
+export function checkExperienceQuality(experience, matched = []) {
+  const bullets = (experience || []).flatMap((x, role) => (x.bullets || []).map(text => ({
+    role, text, hasVerb: hasAction(text), words: words(text)
+  })));
+  if (!bullets.length) return { ok: true, issues: [] };
+
+  const issues = [];
+  // 1. XYZ formula: every bullet should open with an action verb
+  const weak = bullets.filter(b => !b.hasVerb);
+  if (weak.length) issues.push(`${weak.length} bullet${weak.length > 1 ? 's' : ''} don't open with a strong past-tense action verb (e.g. "${weak[0].text.split(/\s+/).slice(0, 6).join(' ')}…") — start each one with what was done: Built, Led, Cut, Launched, Shipped…`);
+
+  // 2. Red flags: dense bullets and stock phrases read weak to a recruiter and match no
+  // ATS keyword either way
+  const long = bullets.filter(b => b.words > 35);
+  if (long.length) issues.push(`${long.length} bullet${long.length > 1 ? 's are' : ' is'} over 35 words — keep each to one or two lines: result, number, method.`);
+  const cliched = bullets.filter(b => hasCliche(b.text));
+  if (cliched.length) issues.push(`${cliched.length} bullet${cliched.length > 1 ? 's use' : ' uses'} a stock phrase instead of a specific tool or outcome — name what was actually built or achieved.`);
+
+  // 3. ATS 10-second skim: the most recent role's top bullets are what a recruiter and an
+  // ATS both read first, so they should name this job's own required skills wherever the
+  // profile's real work already supports them
+  const mentionsAny = (text, terms) => terms.some(t => new RegExp(`\\b${String(t.name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text));
+  const required = matched.filter(t => t.required);
+  if (required.length && experience[0] && experience[0].bullets && experience[0].bullets.length) {
+    const top = experience[0].bullets.slice(0, 2);
+    if (!top.some(b => mentionsAny(b, required))) {
+      issues.push(`The most recent role's first two bullets don't name any of this job's required skills (${required.slice(0, 3).map(t => t.name).join(', ')}) — lead with the achievement that best matches the posting.`);
+    }
+  }
+
+  return { ok: issues.length === 0, issues };
+}
+
+/**
  * The recruiter review of a finished CV for one posting.
  * @param {any} cv the CV as shown (bullets as strings)
  * @param {{ title?: string, description?: string }} job

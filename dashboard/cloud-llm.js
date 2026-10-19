@@ -7,7 +7,7 @@
 // Gemini is tried first when configured (a notably more generous free-tier rate limit
 // than Groq's — see the comment on GEMINI_MODEL), then Groq/OpenRouter as the next tier,
 // mirroring the Claude -> cloud -> local-Ollama fallback one level up in the route.
-import { normalizeCV, validateWholeCvEdit, copiesJdText, hasCliche, unsupportedSkills, skillsNamed } from './tailor.js';
+import { normalizeCV, validateWholeCvEdit, copiesJdText, hasCliche, checkExperienceQuality, unsupportedSkills, skillsNamed } from './tailor.js';
 
 const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 // gemini-3.5-flash-lite: verified live (2026-10-07) as the first model in this key's
@@ -183,70 +183,44 @@ Within each role, order the bullets so that any point naming a programming langu
  * on the main "Tailor my CV" button, after the deterministic pass. Never blocks the
  * tailor: returns null on any failure or when no cloud model is configured, and the
  * caller falls back to the rule-based result.
+ * @param {{name: string, required?: boolean}[]} [matched] posting requirements the
+ * candidate covers (tailorCV's analysis.matched) — feeds the experience-only quality gate
+ * below; omit it and that gate just skips its ATS-relevance check.
  */
-export async function rewriteTailoredCv(cv, job) {
+export async function rewriteTailoredCv(cv, job, matched = []) {
   if (!cloudAiConfigured) return null;
-  try {
-    const user = `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n<job_posting>\nTitle: ${job.title || ''}\nCompany: ${job.company || ''}\n${job.description || ''}\n</job_posting>`;
+  const jdText = `${job.title || ''}\n${job.description || ''}`;
+  // Everything the candidate's own CV says, as the evidence a generated line is held to.
+  // A technology that appears nowhere in here was not theirs to claim: the prompt forbids
+  // it too, but a prompt is advisory and this (plus the JD-copy/cliché checks) is what
+  // actually holds. A field that fails falls back to the rule-based CV's own original.
+  const evidence = JSON.stringify(cv);
+  const clean = (text) => typeof text === 'string' && text.trim()
+    && !copiesJdText(text, jdText) && !hasCliche(text)
+    && unsupportedSkills(text, evidence).length === 0;
 
-    // Measured over seven runs on one real profile and posting, this model answered the
-    // same request with anything from 0% to 89% of the bullets handed straight back
-    // unchanged — the "it didn't tailor the experience section" report. Asking harder in
-    // the prompt doesn't fix a model that is simply inconsistent, so the echo is measured
-    // and a bad draw is re-rolled, the same "enforce it, don't request it" approach as the
-    // fabrication checks below.
-    // Near-identical, not identical. Exact matching missed the common case entirely: the
-    // model hands a bullet back having changed one word, or dropped the figure it was told
-    // not to repeat, and a string compare calls that a rewrite while the user reads it as
-    // the line they already had. Word overlap catches what they actually see.
-    const echoRate = (rewritten) => {
-      const before = (cv.experience || []).flatMap(x => x.bullets || []);
-      const after = (rewritten.experience || []).flatMap(x => x.bullets || []);
-      if (!after.length || !before.length) return 0;
-      const unchanged = after.filter(b => before.some(o => overlap(b, o) >= NEAR_IDENTICAL));
-      return unchanged.length / after.length;
-    };
+  // Near-identical, not identical. Exact matching missed the common case entirely: the
+  // model hands a bullet back having changed one word, or dropped the figure it was told
+  // not to repeat, and a string compare calls that a rewrite while the user reads it as
+  // the line they already had. Word overlap catches what they actually see.
+  const echoRate = (rewritten) => {
+    const before = (cv.experience || []).flatMap(x => x.bullets || []);
+    const after = (rewritten.experience || []).flatMap(x => x.bullets || []);
+    if (!after.length || !before.length) return 0;
+    return after.filter(b => before.some(o => overlap(b, o) >= NEAR_IDENTICAL)).length / after.length;
+  };
 
-    // Two ways this model wastes an attempt, both seen on repeated runs of one real
-    // profile: it hands most of the bullets back unchanged, or it emits JSON that doesn't
-    // parse (malformed mid-object, not a token cut-off — that throws its own error). Both
-    // end as an untailored CV, so both are worth one more draw rather than one.
-    //
-    // The whole thing is on a clock. The Next.js tailor route is capped at 60s
-    // (maxDuration), so the second attempt only runs if there is time for it; out of
-    // budget, the first result stands. A mediocre rewrite beats a failed request.
-    const deadline = Date.now() + TAILOR_BUDGET_MS;
-    const remaining = () => deadline - Date.now();
-    const attempt = (extra) => chatJSON(
-      extra ? `${TAILOR_REWRITE_PROMPT}\n\n${extra}` : TAILOR_REWRITE_PROMPT,
-      user, Math.max(5_000, Math.min(ATTEMPT_TIMEOUT_MS, remaining())), 8000, TAILOR_TEMPERATURE
-    ).catch((err) => { console.error('Tailor attempt failed:', err.message); return null; });
+  // The whole rewrite is on a clock: the Next.js tailor route is capped at 60s
+  // (maxDuration), so a later attempt only runs if there is time for it to return.
+  const deadline = Date.now() + TAILOR_BUDGET_MS;
+  const remaining = () => deadline - Date.now();
 
-    // Keep drawing while the budget allows and the draw is unusable. Three attempts is
-    // where this stopped paying: one bad draw in six survived two attempts on the measured
-    // profile, and the budget usually has room for a third.
-    let out = null;
-    for (let i = 0; i < MAX_ATTEMPTS; i++) {
-      if (i && remaining() < MIN_RETRY_MS) break;
-      const draw = await attempt(i ? ECHO_RETRY_NUDGE : null);
-      // Keep whichever draw rewrote the most — a later attempt that failed or echoed
-      // harder never displaces a better earlier one.
-      if (draw && draw.cv && (!out || !out.cv || echoRate(draw.cv) < echoRate(out.cv))) out = draw;
-      if (out && out.cv && echoRate(out.cv) <= MAX_ECHO) break;
-    }
+  const attempt = async (extra) => {
+    const user = `<cv>\n${JSON.stringify(cv)}\n</cv>\n\n<job_posting>\nTitle: ${job.title || ''}\nCompany: ${job.company || ''}\n${job.description || ''}\n</job_posting>${extra ? `\n\n${extra}` : ''}`;
+    const out = await chatJSON(TAILOR_REWRITE_PROMPT, user,
+      Math.max(5_000, Math.min(ATTEMPT_TIMEOUT_MS, remaining())), 8000, TAILOR_TEMPERATURE)
+      .catch((err) => { console.error('Tailor attempt failed:', err.message); return null; });
     if (!out || !out.cv || typeof out.cv !== 'object' || !Object.keys(out.cv).length) return null;
-    // The prompt tells the model never to copy the posting's own phrasing or use a stock
-    // resume cliché, but a model doesn't always follow that — enforced here per field
-    // (not just asked for), same quality gate web/lib/ai-tailor.ts's mergeRewrite applies.
-    // A field that fails falls back to the rule-based CV's own original for that field.
-    const jdText = `${job.title || ''}\n${job.description || ''}`;
-    // Everything the candidate's own CV says, as the evidence a generated line is held to.
-    // A technology that appears nowhere in here was not theirs to claim: the prompt now
-    // forbids it, but a prompt is advisory and this is the part that actually holds.
-    const evidence = JSON.stringify(cv);
-    const clean = (text) => typeof text === 'string' && text.trim()
-      && !copiesJdText(text, jdText) && !hasCliche(text)
-      && unsupportedSkills(text, evidence).length === 0;
     const fixed = { ...out.cv };
     if ('summary' in fixed && !clean(fixed.summary)) delete fixed.summary;
     if (Array.isArray(fixed.skills)) {
@@ -270,6 +244,38 @@ export async function rewriteTailoredCv(cv, job) {
       });
     }
     return { cv: normalizeCV({ ...cv, ...fixed }), changes: Array.isArray(out.changes) ? out.changes.map(String) : [] };
+  };
+  try {
+    // Two independent ways a draft fails, each with its own history here. It can come back
+    // not actually rewritten — measured at anything up to 89% of bullets handed straight
+    // back — and it can come back rewritten but weak: no action verb, stock phrasing,
+    // overlong, or a most-recent role whose top bullets answer none of the posting's
+    // requirements (checkExperienceQuality, which deliberately never counts a missing
+    // number as a fault, so the gate can't pressure the model into inventing one).
+    //
+    // Both are counted against the same draw and both feed the same corrective retry, so a
+    // draft is only accepted when it is genuinely rewritten AND reads well. Whichever draw
+    // scores best is kept, so a retry can never make the result worse.
+    let best = null, bestScore = Infinity, bestNudge = '';
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      if (i && remaining() < MIN_RETRY_MS) break;
+      const draw = await attempt(i ? bestNudge : null);
+      if (!draw) continue;
+
+      const quality = checkExperienceQuality(draw.cv.experience, matched);
+      const echoed = echoRate(draw.cv) > MAX_ECHO;
+      const score = quality.issues.length + (echoed ? 1 : 0);
+      if (score < bestScore) {
+        best = draw;
+        bestScore = score;
+        bestNudge = [
+          echoed ? ECHO_RETRY_NUDGE : '',
+          quality.issues.length ? `Your last draft of the experience bullets had specific problems — fix these in this rewrite:\n${quality.issues.join('\n')}` : ''
+        ].filter(Boolean).join('\n\n');
+      }
+      if (quality.ok && !echoed) break;
+    }
+    return best;
   } catch (err) {
     console.error('Tailor rewrite failed:', err.message);
     return null;

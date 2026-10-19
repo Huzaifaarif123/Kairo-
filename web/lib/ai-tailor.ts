@@ -17,7 +17,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
-import { parseProfile, stripComments, validateWholeCvEdit, hasCliche, copiesJdText, unsupportedSkills } from './tailor.js';
+import { parseProfile, stripComments, validateWholeCvEdit, hasCliche, copiesJdText, checkExperienceQuality, unsupportedSkills } from './tailor.js';
 import { cloudAiConfigured, chatJSON } from './cloud-llm.js';
 
 export const AI_MODEL = 'claude-sonnet-5-5';
@@ -103,6 +103,7 @@ function buildRewriteUserPrompt(args: {
   covered: string[];
   implied: string[];
   missing: string[];
+  extra?: string;
 }): string {
   return `<job_posting>
 Title: ${args.title || '(not given)'}
@@ -127,7 +128,7 @@ Required skills from the posting that the candidate has: ${args.covered.join(', 
 Skills the profile shows under another name (name them the way the posting does): ${args.implied.join('; ') || '(none)'}
 Required skills from the posting not shown in the profile: ${args.missing.join(', ') || '(none)'} — weave these in where they're a plausible extension of the candidate's real work, following the firm limits above (no invented employer, title, degree, school, certification or number).
 
-Tailor the CV for this posting.`;
+Tailor the CV for this posting.${args.extra ? `\n\n${args.extra}` : ''}`;
 }
 
 // Shared prep: the posting-vs-profile analysis both the Claude and cloud rewrite paths need
@@ -151,6 +152,7 @@ async function requestRewrite(args: {
   covered: string[];
   implied: string[];
   missing: string[];
+  extra?: string;
 }): Promise<Rewrite> {
   const user = buildRewriteUserPrompt(args);
 
@@ -285,8 +287,22 @@ export async function rewriteWithClaude(args: {
   const { covered, implied, missing } = prepRewriteArgs({ base, profileMd, confirmed });
 
   const rewrite = await requestRewrite({ profileMd, title, company, description, confirmed, covered, implied, missing });
-  const { cv, rejected } = mergeRewrite(base.cv, rewrite, profileMd, [], false, `${title}\n${description}`);
-  return { cv, notes: rewrite.notes.slice(0, 6), rejected, model: AI_MODEL };
+  const first = mergeRewrite(base.cv, rewrite, profileMd, [], false, `${title}\n${description}`);
+  // A quality gate on just the experience bullets — XYZ formula, red flags, ATS skim,
+  // scoped to that section (see checkExperienceQuality's own notes, including why a
+  // missing number never counts as a failure here). One corrective retry if it fails,
+  // keeping whichever attempt has fewer issues — never more than one retry, and never
+  // blocks the tailor either way.
+  const firstCheck = checkExperienceQuality(first.cv.experience, base.analysis.matched);
+  if (firstCheck.ok) return { cv: first.cv, notes: rewrite.notes.slice(0, 6), rejected: first.rejected, model: AI_MODEL };
+  const retryRewrite = await requestRewrite({
+    profileMd, title, company, description, confirmed, covered, implied, missing,
+    extra: `Your last draft of the experience bullets had specific problems — fix these in this rewrite:\n${firstCheck.issues.join('\n')}`
+  });
+  const retry = mergeRewrite(base.cv, retryRewrite, profileMd, [], false, `${title}\n${description}`);
+  const retryCheck = checkExperienceQuality(retry.cv.experience, base.analysis.matched);
+  const best = retryCheck.issues.length <= firstCheck.issues.length ? { rewrite: retryRewrite, merged: retry } : { rewrite, merged: first };
+  return { cv: best.merged.cv, notes: best.rewrite.notes.slice(0, 6), rejected: best.merged.rejected, model: AI_MODEL };
 }
 
 const CLOUD_REWRITE_JSON_SHAPE = `Reply with ONLY a JSON object, no other text, shaped exactly like this:
@@ -298,6 +314,17 @@ const CLOUD_REWRITE_JSON_SHAPE = `Reply with ONLY a JSON object, no other text, 
  * same prompt content; only the JSON-shape instructions and transport differ, since these
  * providers don't have Anthropic's structured-output schema enforcement.
  */
+function parseCloudRewrite(raw: Record<string, unknown>): Rewrite {
+  return {
+    headline: String(raw.headline || ''),
+    tagline: Array.isArray(raw.tagline) ? raw.tagline.map(String) : [],
+    summary: String(raw.summary || ''),
+    skills: Array.isArray(raw.skills) ? raw.skills.map((g: { group?: unknown; items?: unknown[] }) => ({ group: String(g.group || ''), items: Array.isArray(g.items) ? g.items.map(String) : [] })) : [],
+    experience: Array.isArray(raw.experience) ? raw.experience.map((e: { index?: unknown; bullets?: unknown[] }) => ({ index: Number(e.index) || 0, bullets: Array.isArray(e.bullets) ? e.bullets.map(String) : [] })) : [],
+    notes: Array.isArray(raw.notes) ? raw.notes.map(String) : []
+  };
+}
+
 export async function rewriteWithCloud(args: {
   base: { cv: Cv; analysis: { matched: { name: string; required: boolean; implied?: string | null }[]; missing: { name: string; required: boolean }[] } };
   profileMd: string;
@@ -309,22 +336,25 @@ export async function rewriteWithCloud(args: {
   if (!cloudAiConfigured) return null;
   const { base, profileMd, title, company, description, confirmed } = args;
   const { covered, implied, missing } = prepRewriteArgs({ base, profileMd, confirmed });
-  const user = buildRewriteUserPrompt({ profileMd, title, company, description, confirmed, covered, implied, missing });
-
-  // Groq's free tier caps combined prompt + completion tokens per request (not just the
-  // model's own limit), so this stays modest rather than Claude's 16k budget — a CV
-  // rewrite that doesn't fit falls back to the rule-based CV, same as any other failure
-  const raw = await chatJSON(`${SYSTEM_PROMPT}\n\n${CLOUD_REWRITE_JSON_SHAPE}`, user, 55_000, 4_000);
-  const rewrite: Rewrite = {
-    headline: String(raw.headline || ''),
-    tagline: Array.isArray(raw.tagline) ? raw.tagline.map(String) : [],
-    summary: String(raw.summary || ''),
-    skills: Array.isArray(raw.skills) ? raw.skills.map((g: { group?: unknown; items?: unknown[] }) => ({ group: String(g.group || ''), items: Array.isArray(g.items) ? g.items.map(String) : [] })) : [],
-    experience: Array.isArray(raw.experience) ? raw.experience.map((e: { index?: unknown; bullets?: unknown[] }) => ({ index: Number(e.index) || 0, bullets: Array.isArray(e.bullets) ? e.bullets.map(String) : [] })) : [],
-    notes: Array.isArray(raw.notes) ? raw.notes.map(String) : []
+  const ask = async (extra?: string) => {
+    const user = buildRewriteUserPrompt({ profileMd, title, company, description, confirmed, covered, implied, missing, extra });
+    // Groq's free tier caps combined prompt + completion tokens per request (not just the
+    // model's own limit), so this stays modest rather than Claude's 16k budget — a CV
+    // rewrite that doesn't fit falls back to the rule-based CV, same as any other failure
+    const raw = await chatJSON(`${SYSTEM_PROMPT}\n\n${CLOUD_REWRITE_JSON_SHAPE}`, user, 55_000, 4_000);
+    return parseCloudRewrite(raw);
   };
-  const { cv, rejected } = mergeRewrite(base.cv, rewrite, profileMd, [], false, `${title}\n${description}`);
-  return { cv, notes: rewrite.notes.slice(0, 6), rejected, model: 'cloud' };
+
+  const rewrite = await ask();
+  const first = mergeRewrite(base.cv, rewrite, profileMd, [], false, `${title}\n${description}`);
+  // Same experience-only quality gate and one-retry policy as rewriteWithClaude above.
+  const firstCheck = checkExperienceQuality(first.cv.experience, base.analysis.matched);
+  if (firstCheck.ok) return { cv: first.cv, notes: rewrite.notes.slice(0, 6), rejected: first.rejected, model: 'cloud' };
+  const retryRewrite = await ask(`Your last draft of the experience bullets had specific problems — fix these in this rewrite:\n${firstCheck.issues.join('\n')}`);
+  const retry = mergeRewrite(base.cv, retryRewrite, profileMd, [], false, `${title}\n${description}`);
+  const retryCheck = checkExperienceQuality(retry.cv.experience, base.analysis.matched);
+  const best = retryCheck.issues.length <= firstCheck.issues.length ? { rewrite: retryRewrite, merged: retry } : { rewrite, merged: first };
+  return { cv: best.merged.cv, notes: best.rewrite.notes.slice(0, 6), rejected: best.merged.rejected, model: 'cloud' };
 }
 
 // ---------- "Tell it what to add or change": anything the rules didn't understand ----------

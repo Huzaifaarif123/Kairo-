@@ -450,7 +450,7 @@ const server = http.createServer(async (req, res) => {
         const aiInfo = { configured: cloudAiConfigured, used: false };
         if (ai !== false && cloudAiConfigured) {
           try {
-            const rewrite = await rewriteTailoredCv(result.cv, { title, company, description });
+            const rewrite = await rewriteTailoredCv(result.cv, { title, company, description }, result.analysis.matched);
             if (rewrite) {
               const rendered = renderTailoredCV(rewrite.cv, { title, company, description, confirmedSkills: confirmed }, profileMd, { template: String(template || ''), styles: styles && typeof styles === 'object' ? styles : {} });
               result = { ...result, ...rendered, changes: [...result.changes, ...rewrite.changes] };
