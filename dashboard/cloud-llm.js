@@ -7,7 +7,7 @@
 // Gemini is tried first when configured (a notably more generous free-tier rate limit
 // than Groq's — see the comment on GEMINI_MODEL), then Groq/OpenRouter as the next tier,
 // mirroring the Claude -> cloud -> local-Ollama fallback one level up in the route.
-import { normalizeCV, validateWholeCvEdit, copiesJdText, hasCliche, unsupportedSkills } from './tailor.js';
+import { normalizeCV, validateWholeCvEdit, copiesJdText, hasCliche, unsupportedSkills, skillsNamed } from './tailor.js';
 
 const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 // gemini-3.5-flash-lite: verified live (2026-10-07) as the first model in this key's
@@ -168,6 +168,7 @@ Firm limits, never crossed:
 - Never build a bullet by stringing the posting's keywords together. Every bullet is one real piece of work, and a reader who knows the job should recognise it as a thing someone actually did.
 - Never change what a piece of the candidate's experience actually means in order to make it fit better.
 - Never copy a sentence or distinctive phrase straight from the job posting — write this candidate's own voice, specific to their own work.
+Keep every technology the bullet already names. Removing one is the opposite of tailoring: "Implemented Kafka streaming pipelines" must not become "Implemented streaming pipelines", and "Architected LangGraph agent systems" must not become "Architected agent systems". Those names are the candidate's evidence and the words the posting is screened for. Rewrite around them — lead with the one this posting asks for — but never drop one.
 Return every bullet you were given for every role — all of them, rewritten. Dropping bullets is not tailoring, it is losing the candidate's experience: a role that arrives with five bullets leaves with five. Only ever merge two if they genuinely describe one piece of work.
 Bullets start with a strong past-tense verb, stay under 30 words, no first person ("I", "we"). No stock phrases ("team player", "results-driven", "detail-oriented", "proven track record", "passionate about" and the like).
 Within each role, order the bullets so that any point naming a programming language (Python, TypeScript, Go, SQL, Java and the like) comes before the points that name none. Ordering only — never invent a language the candidate's work doesn't support, and never drop a point to make room.`;
@@ -252,6 +253,16 @@ export async function rewriteTailoredCv(cv, job) {
       fixed.experience = fixed.experience.map((job2, i) => {
         const bullets = Array.isArray(job2.bullets) ? job2.bullets.filter(clean) : [];
         const original = cv.experience[i];
+        // Told firmly enough not to claim a technology the CV doesn't support, this model
+        // started playing safe by deleting the ones it did: "Implemented Kafka streaming
+        // pipelines" came back as "Implemented streaming pipelines". Measured, a rewrite
+        // dropped about 60% of the named tools — including ones the posting asked for by
+        // name, which is the opposite of tailoring and reads to the user as no change at
+        // all. A role that comes back naming fewer of its own technologies has lost more
+        // than it gained, so its original bullets stand.
+        const kept = new Set(bullets.flatMap(b => skillsNamed(b)));
+        const had = original ? new Set(original.bullets.flatMap(b => skillsNamed(b))) : new Set();
+        if (original && [...had].some(s => !kept.has(s))) return { ...job2, bullets: original.bullets };
         return { ...job2, bullets: bullets.length ? bullets : (original ? original.bullets : job2.bullets) };
       });
     }

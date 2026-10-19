@@ -2200,6 +2200,18 @@ const toWords = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' '
  * @param sourceText the candidate's own CV/profile, as the text to be supported by
  * @returns the unsupported technology names, in LEXICON spelling ([] when all are grounded)
  */
+/**
+ * The technologies `text` names, in LEXICON spelling. The counterpart to
+ * unsupportedSkills: that one asks what a line claims without evidence, this one asks what
+ * it claims at all — used to check a rewrite hasn't quietly dropped the tools the bullet
+ * started with, which is what a recruiter and an ATS are both reading for.
+ */
+export function skillsNamed(text) {
+  const line = String(text || '');
+  if (!line.trim()) return [];
+  return [...new Set(TERMS.filter(t => countMatches(t.re, line) > 0).map(t => t.name))];
+}
+
 export function unsupportedSkills(text, sourceText) {
   const line = String(text || '');
   const source = String(sourceText || '');
