@@ -195,11 +195,16 @@ export async function rewriteTailoredCv(cv, job) {
     // the prompt doesn't fix a model that is simply inconsistent, so the echo is measured
     // and a bad draw is re-rolled, the same "enforce it, don't request it" approach as the
     // fabrication checks below.
+    // Near-identical, not identical. Exact matching missed the common case entirely: the
+    // model hands a bullet back having changed one word, or dropped the figure it was told
+    // not to repeat, and a string compare calls that a rewrite while the user reads it as
+    // the line they already had. Word overlap catches what they actually see.
     const echoRate = (rewritten) => {
-      const before = new Set((cv.experience || []).flatMap(x => x.bullets || []).map(bulletKey));
-      const after = (rewritten.experience || []).flatMap(x => x.bullets || []).map(bulletKey);
-      if (!after.length || !before.size) return 0;
-      return after.filter(b => before.has(b)).length / after.length;
+      const before = (cv.experience || []).flatMap(x => x.bullets || []);
+      const after = (rewritten.experience || []).flatMap(x => x.bullets || []);
+      if (!after.length || !before.length) return 0;
+      const unchanged = after.filter(b => before.some(o => overlap(b, o) >= NEAR_IDENTICAL));
+      return unchanged.length / after.length;
     };
 
     // Two ways this model wastes an attempt, both seen on repeated runs of one real
@@ -253,17 +258,8 @@ export async function rewriteTailoredCv(cv, job) {
       fixed.experience = fixed.experience.map((job2, i) => {
         const bullets = Array.isArray(job2.bullets) ? job2.bullets.filter(clean) : [];
         const original = cv.experience[i];
-        // Told firmly enough not to claim a technology the CV doesn't support, this model
-        // started playing safe by deleting the ones it did: "Implemented Kafka streaming
-        // pipelines" came back as "Implemented streaming pipelines". Measured, a rewrite
-        // dropped about 60% of the named tools — including ones the posting asked for by
-        // name, which is the opposite of tailoring and reads to the user as no change at
-        // all. A role that comes back naming fewer of its own technologies has lost more
-        // than it gained, so its original bullets stand.
-        const kept = new Set(bullets.flatMap(b => skillsNamed(b)));
-        const had = original ? new Set(original.bullets.flatMap(b => skillsNamed(b))) : new Set();
-        if (original && [...had].some(s => !kept.has(s))) return { ...job2, bullets: original.bullets };
-        return { ...job2, bullets: bullets.length ? bullets : (original ? original.bullets : job2.bullets) };
+        if (!original) return { ...job2, bullets: bullets.length ? bullets : job2.bullets };
+        return { ...job2, bullets: repairRole(original.bullets, bullets) };
       });
     }
     if (Array.isArray(fixed.projects)) {
@@ -298,6 +294,10 @@ const ATTEMPT_TIMEOUT_MS = 28_000;
 // Below this there isn't time for a second attempt to return, so the first result stands.
 const MIN_RETRY_MS = 12_000;
 // Draws per tailor. Measured: one draw in six was still unusable after two.
+// Two bullets sharing this much of their wording are the same line to a reader, whatever
+// a string compare says.
+const NEAR_IDENTICAL = 0.85;
+
 const MAX_ATTEMPTS = Number(process.env.TAILOR_MAX_ATTEMPTS || 3);
 
 // Appended only on the retry, naming what went wrong with the first attempt.
@@ -305,6 +305,57 @@ const ECHO_RETRY_NUDGE = `Your previous attempt handed most of the bullets back 
 
 /** A bullet reduced to its words, for comparing two versions of the same CV. */
 const bulletKey = (b) => String(b || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+const wordSet = (s) => new Set(bulletKey(s).split(' ').filter(Boolean));
+
+/** How much two bullets overlap in words, 0..1 — used to tell which one is a rewrite of which. */
+function overlap(a, b) {
+  const A = wordSet(a), B = wordSet(b);
+  if (!A.size || !B.size) return 0;
+  let shared = 0;
+  for (const w of A) if (B.has(w)) shared++;
+  return shared / (A.size + B.size - shared);
+}
+
+/**
+ * One role's bullets, repaired rather than accepted or rejected wholesale.
+ *
+ * The first version of this check threw away a role's entire rewrite the moment one bullet
+ * lost a technology, which on a measured run reverted three of four roles and left the
+ * experience section reading exactly as before — the complaint it was meant to fix. The
+ * loss is per bullet, so the repair is too: each rewritten bullet is paired with the
+ * original it came from, and only a bullet that actually dropped one of its own tools is
+ * swapped back. A good rewrite beside a bad one now survives.
+ *
+ * Every original is accounted for, so a role never ends up shorter than it started, and no
+ * technology the candidate had can go missing.
+ */
+function repairRole(originals, rewritten) {
+  if (!originals || !originals.length) return rewritten;
+  if (!rewritten || !rewritten.length) return originals;
+
+  const takenOriginal = new Set();
+  const out = [];
+  for (const line of rewritten) {
+    // The original this line is a rewrite of: the closest one not already claimed.
+    let best = -1, bestScore = 0;
+    originals.forEach((o, i) => {
+      if (takenOriginal.has(i)) return;
+      const s = overlap(line, o);
+      if (s > bestScore) { bestScore = s; best = i; }
+    });
+    // Below this the line isn't a rewrite of anything — it's new material. It has already
+    // passed the grounding and JD-copy checks, so it stands on its own.
+    if (best < 0 || bestScore < 0.25) { out.push(line); continue; }
+    takenOriginal.add(best);
+    const origin = originals[best];
+    const lost = skillsNamed(origin).filter(s => !skillsNamed(line).includes(s));
+    out.push(lost.length ? origin : line);
+  }
+  // Anything the model quietly dropped comes back, in its original order.
+  originals.forEach((o, i) => { if (!takenOriginal.has(i) && !out.includes(o)) out.push(o); });
+  return out;
+}
 
 const ASK_PROMPT = `You answer questions about a CV, honestly and specifically, using only what's in the CV JSON you're given (and the job posting, if one is given). Reply with ONLY a JSON object: {"answers": {"<question, exactly as asked>": "<a short, specific, plain-English answer, 1-3 sentences>"}}. One entry per question. Never invent facts not in the CV; if something truly can't be answered from the CV, say so plainly in the answer rather than guessing.`;
 
