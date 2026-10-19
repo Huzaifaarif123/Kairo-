@@ -2182,6 +2182,36 @@ function editNumbers(s) {
 const toWords = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
 
 /**
+ * The technologies named in `text` that the candidate's own CV never mentions.
+ *
+ * The backstop for the failure the prompts could not prevent on their own: a model reads
+ * "Kubernetes" in the posting and works it into a bullet about work that never touched it.
+ * A posting naming a tool is not evidence the candidate has used it, so a generated bullet
+ * may only name a technology that appears somewhere in the candidate's own source.
+ *
+ * Deliberately narrow, because the blunt version of this check does real damage. It tests
+ * only names in the LEXICON — a curated list of technologies — so ordinary words the
+ * posting and the CV naturally share ("designed", "platform", "data") are never touched,
+ * and a term is supported by appearing anywhere in the source, not just in the same role.
+ * Matching is by each term's own regex, so word boundaries and the awkward names ("Go",
+ * "C#", "R") behave as they do everywhere else.
+ *
+ * @param text one generated line — a bullet, a summary, a skill
+ * @param sourceText the candidate's own CV/profile, as the text to be supported by
+ * @returns the unsupported technology names, in LEXICON spelling ([] when all are grounded)
+ */
+export function unsupportedSkills(text, sourceText) {
+  const line = String(text || '');
+  const source = String(sourceText || '');
+  if (!line.trim() || !source.trim()) return [];
+  const out = [];
+  for (const t of TERMS) {
+    if (countMatches(t.re, line) > 0 && countMatches(t.re, source) === 0) out.push(t.name);
+  }
+  return [...new Set(out)];
+}
+
+/**
  * Whether `text` contains a 6-word sequence copied straight from the job posting — the
  * deterministic backstop for "never copy JD phrasing" (the prompts already say this, but a
  * prompt is advisory; this is enforced). A 6-word match is specific enough that it can't be
@@ -4672,8 +4702,194 @@ ${renderSections(s, sections)}
   }
 };
 
-// Available CV layouts (the six supplied LaTeX templates)
-export const CV_TEMPLATES = Object.fromEntries([atsClassic, modernSerif, traditional, executive, compact, navy].map(t => [t.id, t]));
+// ----- Template 7: Charter (serif body, ruled headings, role/date table) -----
+//
+// Denser than the others: Charter on a 0.55in margin fits a long skills matrix and
+// eight-bullet roles on one page, which the Helvetica layouts spill onto two. The role
+// line is a two-column table (title left, dates right) with the company italic beneath,
+// rather than the company sitting on the same line.
+
+const charter = {
+  id: 'charter',
+  label: 'Charter (serif, dense)',
+  defaultStyle: { fontFamily: 'template', fontSize: 10, headerAlign: 'center', accentColor: '#000000', lineSpacing: 1, sectionSpacing: 1, boldHeadings: true, italicHeadings: false, sections: ['summary', 'skills', 'experience', 'projects', 'education', 'certifications'] },
+
+  css(s) {
+    return `${SHARED_CSS}
+  @page { size: letter; margin: 0.45in 0.55in; }
+  body { font-family: Charter, 'Bitstream Charter', 'Sitka Text', Cambria, Georgia, serif; font-size: 10pt; line-height: 1.34; }
+  .page { padding: 0.45in 0.55in; max-width: 8.5in; margin: 0 auto; }
+  .cv-header { text-align: center; }
+  h1 { font-size: 24pt; font-weight: 700; line-height: 1.1; }
+  .cv-headline { font-size: 12pt; font-weight: 700; margin-top: 4px; }
+  .cv-tagline, .cv-contact { font-size: 9pt; margin-top: 3px; }
+  .cv-tagline span { margin: 0 4px; }
+  .cv-contact span { margin: 0 5px; }
+  h2 { font-size: 12pt; border-bottom: 0.8pt solid #000; padding-bottom: 1px; }
+  .cv-skill { margin: 0 0 1.5pt; }
+  .cv-job { margin-top: 8px; break-inside: avoid; }
+  .cv-job:first-of-type { margin-top: 0; }
+  .cv-job-head { display: flex; justify-content: space-between; gap: 12px; font-weight: 700; }
+  .cv-job-head span { white-space: nowrap; }
+  .cv-company { font-style: italic; margin-bottom: 2px; }
+  ul { padding-left: 1.1em; margin-top: 2px; }
+  li { margin: 1px 0; }
+  .cv-edu { display: flex; justify-content: space-between; gap: 12px; }
+  @media screen and (max-width: 600px) { .cv-job-head, .cv-edu { flex-wrap: wrap; gap: 0 8px; } .cv-job-head span { white-space: normal; } }
+  ${styleCss(s, this.defaultStyle, { lineHeight: 1.34, h2Top: 11, h2Bottom: 5 })}`;
+  },
+
+  html(cv, terms, s) {
+    const hl = (x) => markup(x, terms, escHtml, (m) => `<mark>${m}</mark>`);
+    const sections = {
+      summary: () => (cv.summary ? `<section><h2>Professional Summary</h2><p>${hl(cv.summary)}</p></section>` : ''),
+      skills: () => (cv.skills.length ? `<section><h2>Technical Skills</h2>${cv.skills.map(g => `<p class="cv-skill"><strong>${escHtml(g.group)}:</strong> ${g.items.map(skillHtml).join(', ')}</p>`).join('')}</section>` : ''),
+      experience: () => (cv.experience.length ? `<section><h2>Professional Experience</h2>${cv.experience.map(x => `
+  <div class="cv-job"><div class="cv-job-head"><div>${escHtml(x.role)}</div><span>${escHtml(x.period)}</span></div>
+    <div class="cv-company">${escHtml(x.company)}</div><ul>${x.bullets.map(b => `<li>${hl(b)}</li>`).join('')}</ul></div>`).join('')}</section>` : ''),
+      projects: () => (cv.projects.length ? `<section><h2>Projects</h2>${cv.projects.map(pr => `
+  <div class="cv-job"><div class="cv-job-head"><div>${escHtml(pr.name)}</div><span></span></div>
+    ${pr.tech.length ? `<div class="cv-company">${escHtml(pr.tech.join(', '))}</div>` : ''}<ul>${projectBullets(pr).map(b => `<li>${hl(b)}</li>`).join('')}</ul></div>`).join('')}</section>` : ''),
+      education: () => (cv.education.length ? `<section><h2>Education</h2>${cv.education.map(e => `<div class="cv-edu"><strong>${escHtml(e.degree)}</strong>${e.period ? `<strong>${escHtml(e.period)}</strong>` : ''}</div><div>${escHtml(e.school)}</div>`).join('')}</section>` : ''),
+      certifications: () => (cv.certifications.length ? `<section><h2>Certifications</h2>${cv.certifications.map(c => `<div>${escHtml(c)}</div>`).join('')}</section>` : '')
+    };
+    return `
+<header class="cv-header">
+  <h1>${escHtml(cv.name)}</h1>
+  ${cv.headline ? `<p class="cv-headline">${escHtml(cv.headline)}</p>` : ''}
+  ${cv.tagline.length ? `<p class="cv-tagline">${cv.tagline.map(escHtml).join('<span>&middot;</span>')}</p>` : ''}
+  <p class="cv-contact">${contactParts(cv).map(escHtml).join('<span>|</span>')}</p>
+</header>
+${renderSections(s, sections)}`;
+  },
+
+  latex(cv, title, company, s) {
+    const contact = [
+      cv.location && escTex(cv.location),
+      cv.email && `\\href{mailto:${cv.email}}{${escTex(cv.email)}}`,
+      cv.phone && escTex(cv.phone),
+      cv.linkedin && texLink(cv.linkedin)
+    ].filter(Boolean).join(' \\enspace$|$\\enspace\n    ');
+    const sections = {
+      summary: () => (cv.summary ? `
+\\section{Professional Summary}
+${escTex(cv.summary)}
+` : ''),
+      skills: () => (cv.skills.length ? `
+\\section{Technical Skills}
+${cv.skills.map(g => `  \\skill{${escTex(g.group)}}{${g.items.map(i => escTex(i.name)).join(', ')}}`).join('\n')}
+` : ''),
+      experience: () => (cv.experience.length ? `
+\\section{Professional Experience}
+${cv.experience.map((x, i) => `${i ? `\n\\vspace{${s.gap(3)}pt}\n` : ''}
+\\role{${escTex(x.role)}}{${texPeriod(x.period)}}{${escTex(x.company)}}
+\\begin{itemize}
+${x.bullets.map(b => `  \\item ${escTex(b)}`).join('\n')}
+\\end{itemize}`).join('\n')}
+` : ''),
+      projects: () => (cv.projects.length ? `
+\\section{Projects}
+${cv.projects.map((pr, i) => `${i ? `\n\\vspace{${s.gap(3)}pt}\n` : ''}
+\\role{${escTex(pr.name)}}{}{${escTex(pr.tech.join(', '))}}
+\\begin{itemize}
+${projectBullets(pr).map(b => `  \\item ${escTex(b)}`).join('\n')}
+\\end{itemize}`).join('\n')}
+` : ''),
+      education: () => (cv.education.length ? `
+\\section{Education}
+${cv.education.map(e => `\\textbf{${escTex(e.school)}}${e.period ? ` \\hfill ${texPeriod(e.period)}` : ''}\\\\\n${escTex(e.degree)}`).join('\n\n\\vspace{3pt}\n\n')}
+` : ''),
+      certifications: () => (cv.certifications.length ? `
+\\section{Certifications}
+${cv.certifications.map(escTex).join('\\\\\n')}
+` : '')
+    };
+    return `${texHeader(cv, title, company)}\\documentclass[${s.fontSize}pt,letterpaper]{article}
+
+%====================
+% FONT AND ATS
+%====================
+\\usepackage[T1]{fontenc}
+\\usepackage[utf8]{inputenc}
+\\usepackage{charter}${s.fontPreamble ? `\n${s.fontPreamble}` : ''}
+
+% Improve ATS text extraction
+\\input{glyphtounicode}
+\\pdfgentounicode=1
+
+%====================
+% PAGE SETUP
+%====================
+\\usepackage[margin=0.55in,top=0.45in,bottom=0.45in]{geometry}
+
+%====================
+% PACKAGES
+%====================
+\\usepackage[hidelinks]{hyperref}
+\\usepackage{titlesec}
+\\usepackage{enumitem}
+\\usepackage{tabularx}
+\\usepackage{array}
+\\usepackage{needspace}${accentPreamble(s, true)}${s.linespread}
+
+%====================
+% GENERAL SETTINGS
+%====================
+\\pagestyle{empty}
+\\setlength{\\parindent}{0pt}
+\\setlength{\\tabcolsep}{0pt}
+\\raggedright
+\\hyphenpenalty=10000
+\\exhyphenpenalty=10000
+
+%====================
+% SECTION FORMATTING
+%====================
+\\titleformat{\\section}
+    {\\large${s.headingStyle}${s.accentChanged ? '\\color{accent}' : ''}}
+    {}{0em}{}[\\vspace{0.5pt}${withAccent(s, '\\titlerule[0.8pt]')}]
+
+\\titlespacing*{\\section}{0pt}{${s.gap(8)}pt}{${s.gap(4)}pt}
+
+%====================
+% EXPERIENCE HEADER
+%====================
+\\newcommand{\\role}[3]{%
+    \\needspace{5\\baselineskip}\\vspace{3pt}%
+    \\begin{tabularx}{\\linewidth}{@{}X r@{}}
+        \\textbf{#1} & \\textbf{#2} \\\\
+        \\textit{#3} & \\\\
+    \\end{tabularx}\\vspace{-2pt}%
+}
+
+% One plain line per skill category, no bullet
+\\newcommand{\\skill}[2]{\\textbf{#1:} #2\\par\\vspace{1.5pt}}
+
+%====================
+% BULLET SETTINGS
+%====================
+\\setlist[itemize]{leftmargin=1.1em, itemsep=1pt, topsep=2pt, parsep=0pt, label={\\small\\textbullet}}
+
+%====================
+% DOCUMENT
+%====================
+\\begin{document}
+
+%====================
+% HEADER
+%====================
+\\begin{${s.alignEnv}}
+    {\\fontsize{24}{28}\\selectfont${s.headingStyle}${s.accentChanged ? '\\color{accent}' : ''} ${escTex(cv.name)}}\\\\[4pt]
+${cv.headline ? `    {\\large\\bfseries ${escTex(cv.headline)}}\\\\[3pt]\n` : ''}${cv.tagline.length ? `    {\\small ${cv.tagline.map(escTex).join(' $\\cdot$ ')}}\\\\[4pt]\n` : ''}    {\\small ${contact}}
+\\end{${s.alignEnv}}
+${renderSections(s, sections)}
+\\end{document}
+`;
+  }
+};
+
+// Available CV layouts (the seven supplied LaTeX templates)
+export const CV_TEMPLATES = Object.fromEntries([atsClassic, modernSerif, traditional, executive, compact, navy, charter].map(t => [t.id, t]));
 export const DEFAULT_TEMPLATE = atsClassic.id;
 
 /** Each layout's own style, for the toolbar's "untouched" state. */

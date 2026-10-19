@@ -2,9 +2,10 @@
 //
 // The rule-based engine (tailor.js) first works out which requirements the candidate
 // covers and picks the most relevant content. Claude then rewrites the headline,
-// summary, skills and bullets to speak directly to the posting — it can describe the
-// candidate's real work in the posting's own vocabulary and plausibly extend it, not
-// just rearrange what the rule-based pass already picked out verbatim.
+// summary, skills and bullets to speak directly to the posting — restating the
+// candidate's real work in the posting's own vocabulary where that names the same thing,
+// not just rearranging what the rule-based pass already picked out verbatim. What the
+// posting asks for and the profile cannot support is left out, never extended to cover.
 //
 // Everything Claude returns is still checked before it's used: the candidate's real
 // career facts (employers, titles, companies, dates, degrees, schools, certifications)
@@ -16,7 +17,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
-import { parseProfile, stripComments, validateWholeCvEdit, hasCliche, copiesJdText, checkExperienceQuality } from './tailor.js';
+import { parseProfile, stripComments, validateWholeCvEdit, hasCliche, copiesJdText, checkExperienceQuality, unsupportedSkills } from './tailor.js';
 import { cloudAiConfigured, chatJSON } from './cloud-llm.js';
 
 export const AI_MODEL = 'claude-sonnet-5-5';
@@ -46,13 +47,27 @@ const RewriteSchema = z.object({
 
 type Rewrite = z.infer<typeof RewriteSchema>;
 
-const SYSTEM_PROMPT = `You are an expert technical CV writer. You tailor a candidate's CV to one job posting so it reads as a strong match for that posting, grounded in the candidate's real career but shaped and extended to speak directly to what the posting is asking for.
+const SYSTEM_PROMPT = `You are an expert technical CV writer. You tailor a candidate's CV to one job posting so it reads as a strong match for that posting — a match built entirely out of what the candidate has actually done.
+
+Where the facts come from, and this ranking settles every conflict:
+1. The candidate's profile is the only record of their career. Every claim you write must be supported by something in it.
+2. The posting tells you what the employer wants and what words they use for it. It is NEVER evidence about the candidate. A tool named in the posting does not mean they have used it; a responsibility listed there does not mean they have held it.
+3. Where the profile gives you no support for something the posting asks for, leave it out. A shorter, true CV beats a fuller, invented one — and an interview exposes the difference.
+
+Work this out before you write, and keep it to yourself (return only the expected output):
+- what the role is really for, and the handful of requirements that matter most;
+- for each of those, what in this profile genuinely speaks to it;
+- which are fully supported, which only partly, and which not at all.
+Then write so the supported ones lead, in the clearest and most relevant terms the profile's own facts allow.
 
 Firm limits (these override everything else):
+- Never name a technology, tool, framework, language or platform unless the profile already names it. Adjacent is not the same: REST APIs are not GraphQL, Docker is not Kubernetes, a database is not a specific one. If the profile doesn't name it, you don't either.
+- Never turn one of the posting's requirements into something the candidate did. Reading "optimise SQL queries and build ETL workflows" in the posting, next to "created sales dashboards using SQL Server and SSIS" in the profile, the honest rewrite is "Built sales dashboards in SQL Server and SSIS to support sales reporting and analysis" — NOT "Developed ETL workflows, transformed business data and optimised SQL queries", which quietly awards the candidate the employer's whole wish list.
 - Never invent a new employer, job title, degree, school or certification the candidate didn't have — their real career history (who they worked for, what they studied, what they're certified in, and the dates) stays exactly as given.
-- Never add a specific number, percentage or metric that isn't already in the profile for that exact point. Describe scope and impact in plain terms instead of a figure.
+- Never add a specific number, percentage or metric that isn't already in the profile for that exact point. A posting asking for "measurable impact" is not permission to supply one: describe scope in plain terms instead of a figure.
+- Never build a bullet by stringing the posting's keywords together, and never change what a piece of experience actually means in order to make it fit better.
 
-Everything else you can shape freely: describe the candidate's real work using the posting's own vocabulary, and plausibly extend it where that's a reasonable reading of what they actually did — for example, if they list "built REST APIs in Node.js" and the posting wants GraphQL experience, you may write that they built GraphQL APIs if that's a natural extension of their real stack, not an invention from nothing. Weave in the posting's required skills and tools wherever there's a plausible basis for them in the candidate's actual roles, even where the profile doesn't use that exact wording. When the posting names something the profile describes in other words (for example "Postgres" for "PostgreSQL", or "LLM evaluation" for work the profile describes as evals with LangSmith), use the posting's wording.
+Use the posting's vocabulary ONLY where it genuinely names the same thing the profile already describes: the posting's "Postgres" for the profile's "PostgreSQL" is the same thing, and "LLM evaluation" for work the profile describes as evals with LangSmith is the same thing. The posting's "Kubernetes" for a profile that only mentions Docker is not.
 
 Writing rules:
 - Headline: the posting's job title, cleaned of location, gender markers, reference numbers and "remote".
@@ -62,9 +77,9 @@ Writing rules:
   3. "Experienced across the full <AI product / data / delivery> lifecycle, including <stages the profile shows and the posting asks for>."
   4. One sentence naming the scope or kind of impact of the work (e.g. systems shipped, teams or products supported) — in plain terms, without citing a specific number or percentage.
 - Skills: use only these category labels, in this order, and only the ones that have relevant skills: Languages; Machine Learning; Generative AI and LLMs; AI Agents and Orchestration; RAG and Retrieval; LLM Training and Fine Tuning; Inference and Model Serving; MLOps and Evaluation; Backend and APIs; Frontend; Data Engineering; Cloud and Infrastructure; Monitoring and Observability; Testing; Databases; Design; Other Tools. Put the posting's required skills the candidate has first in each category. Leave out skills irrelevant to this posting and soft skills.
-- Bullets: rewrite the candidate's own bullets for each role, most relevant to the posting first. State the outcome (X) and the tool or method used (Z) — what was done and how. Do NOT include a specific number, percentage or quantified metric in a bullet by default, even where the profile states one for that work — name the action and the method only, unless the request you were given explicitly asks you to include the candidate's real achievement figures (if it does, use only the profile's own number, exactly as stated, never invented or rounded). Start with a strong past-tense verb (present tense for a current role is fine); never start with "Responsible for", "Worked on", "Helped" or "Involved in". Work the posting's keywords in naturally, extending the candidate's real work to cover them where that's a plausible reading of what the role actually involved. At most 30 words each. Write as many bullets per role as there's real, distinct ground for (most recent role up to 8; next 7; then 6) — a role with little material should have fewer bullets, not inflated ones. When a role has fewer facts, split bullets that hold two achievements. No stock phrases ("team player", "results-driven", "detail-oriented", "hardworking", "self-starter", "proven track record", "passionate about" and the like) in any bullet — such content is rejected automatically.
+- Bullets: rewrite the candidate's own bullets for each role, most relevant to the posting first. State the outcome (X) and the tool or method used (Z) — what was done and how. Do NOT include a specific number, percentage or quantified metric in a bullet by default, even where the profile states one for that work — name the action and the method only, unless the request you were given explicitly asks you to include the candidate's real achievement figures (if it does, use only the profile's own number, exactly as stated, never invented or rounded). Start with a strong past-tense verb (present tense for a current role is fine); never start with "Responsible for", "Worked on", "Helped" or "Involved in". Use the posting's keywords only where they truthfully describe what that role already did; a requirement this role has no evidence for is left out rather than covered. At most 30 words each. Write as many bullets per role as there's real, distinct ground for (most recent role up to 8; next 7; then 6) — a role with little material should have fewer bullets, not inflated ones. When a role has fewer facts, split bullets that hold two achievements. No stock phrases ("team player", "results-driven", "detail-oriented", "hardworking", "self-starter", "proven track record", "passionate about" and the like) in any bullet — such content is rejected automatically.
 - The candidate's projects and education are kept exactly as the profile states them; do not add sections or content beyond what is asked for here.
-- Tailor the content, don't stuff keywords: make each bullet answer something the posting asks for. Use the posting's own wording for a skill whenever there's a plausible basis for it in that role's real work, per the firm limits above.
+- Tailor the content, don't stuff keywords: make each bullet answer something the posting asks for out of what that role genuinely involved. Where the posting and the profile name the same thing differently, the posting's wording is fine; where the posting names something this role never did, nothing goes in — coverage is not the goal, accuracy is.
 - Design the CV around what the posting asks for, but it must never read like a copy of the posting: never reuse the posting's own sentence structure, phrasing or ordering of requirements. The result should read as this specific candidate's own experience, shaped toward this role — not a restatement of the job description with their name on it.
 - Write in plain, specific language that reads naturally to a hiring manager and passes ATS keyword matching.`;
 
@@ -206,10 +221,16 @@ export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, bloc
   const numbersOk = (text: string, allowed: Set<string> = profileNumbers) => unfiltered || numbersIn(text).every(n => allowed.has(n));
   const noCliche = (text: string) => !hasCliche(text);
   const notCopied = (text: string) => !jdText || !copiesJdText(text, jdText);
+  // The candidate's own profile, as the evidence every generated line is held to. A
+  // posting naming Kubernetes is not evidence the candidate has used it, so a line naming
+  // a technology the profile never mentions is rejected and the original kept instead.
+  // The prompts forbid this too, but a prompt is advisory and this is what actually holds.
+  const evidenceText = stripComments(profileMd);
+  const grounded = (text: string) => unsupportedSkills(text, evidenceText).length === 0;
   const mentionsBlocked = (text: string) => blocked.some(b => new RegExp(`(?<![a-z0-9])${b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`).test(norm(text)));
   const skillOk = (item: string) => {
     const n = norm(item.replace(/\s*\(.*?\)\s*/g, ' '));
-    return Boolean(n) && !mentionsBlocked(item) && notCopied(item);
+    return Boolean(n) && !mentionsBlocked(item) && notCopied(item) && grounded(item);
   };
 
   const headline = rewrite.headline.trim();
@@ -222,7 +243,7 @@ export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, bloc
   else rejected++;
 
   const summary = rewrite.summary.trim();
-  if (summary && words(summary) <= MAX_SUMMARY_WORDS && numbersOk(summary) && !mentionsBlocked(summary) && noCliche(summary) && notCopied(summary)) out.summary = summary;
+  if (summary && words(summary) <= MAX_SUMMARY_WORDS && numbersOk(summary) && !mentionsBlocked(summary) && noCliche(summary) && notCopied(summary) && grounded(summary)) out.summary = summary;
   else rejected++;
 
   const skills = rewrite.skills
@@ -238,7 +259,7 @@ export function mergeRewrite(base: Cv, rewrite: Rewrite, profileMd: string, bloc
     const seen = new Set<string>();
     const good = fromClaude
       .map(b => b.trim().replace(/^[-•*]\s*/, ''))
-      .filter(b => b && words(b) <= MAX_BULLET_WORDS && numbersOk(b, roleNumbers) && !mentionsBlocked(b) && noCliche(b) && notCopied(b))
+      .filter(b => b && words(b) <= MAX_BULLET_WORDS && numbersOk(b, roleNumbers) && !mentionsBlocked(b) && noCliche(b) && notCopied(b) && grounded(b))
       // de-duplicate: a model occasionally repeats the same bullet (verbatim or
       // near-identical) within one role
       .filter(b => { const n = norm(b); if (seen.has(n)) return false; seen.add(n); return true; });
