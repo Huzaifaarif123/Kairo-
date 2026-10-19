@@ -3,7 +3,7 @@
 // the project): `node dashboard/tailor.test.js`. Exits non-zero on any failure, so it can
 // be wired into CI as-is.
 import {
-  tailorCV, applyInstructions, validateWholeCvEdit, copiesJdText, hasDuplicateLines, hasCliche
+  tailorCV, applyInstructions, validateWholeCvEdit, copiesJdText, hasDuplicateLines, hasCliche, checkExperienceQuality
 } from './tailor.js';
 
 let pass = 0, fail = 0;
@@ -119,6 +119,26 @@ function ok(label, cond) { cond ? pass++ : (fail++, console.log(`FAIL ${label}`)
   const job = { title: 'Cloud Engineer', description: 'Requirements:\n- AWS\n- Terraform' };
   const r = applyInstructions(JSON.parse(JSON.stringify(cv)), 'add some certifications', { job, unfiltered: true });
   ok('Certifications prioritize the JD requirements, not the CV\'s existing (unrelated) skills', r.cv.certifications.some(c => /AWS|Terraform/i.test(c)));
+}
+
+// ---------- checkExperienceQuality: the experience-only gate on AI-written bullets ----------
+{
+  const role = (bullets) => [{ role: 'Eng', company: 'A', bullets }];
+  ok('Quality gate: a well-formed bullet passes', checkExperienceQuality(role(['Built a GraphQL API using Node.js and Postgres for enterprise clients.']), []).ok);
+  const weak = checkExperienceQuality(role(['Responsible for the backend systems and various other duties.']), []);
+  ok('Quality gate: flags a bullet with no action verb', !weak.ok && weak.issues.some(i => /action verb/.test(i)));
+  const cliched = checkExperienceQuality(role(['Delivered results as a results-driven team player.']), []);
+  ok('Quality gate: flags a stock-phrase bullet', !cliched.ok && cliched.issues.some(i => /stock phrase/.test(i)));
+  const dense = checkExperienceQuality(role(['Built and shipped and maintained and documented and tested and deployed and monitored and iterated on a very large and complex distributed backend system spanning many services and teams across the whole organization for over a year straight without stopping.']), []);
+  ok('Quality gate: flags an over-long bullet', !dense.ok && dense.issues.some(i => /35 words/.test(i)));
+  // The one rule that must never change: a bullet with no number still passes everything —
+  // this gate must never give the AI a reason to invent a number to satisfy it
+  ok('Quality gate: a real bullet with no number still passes (never forces a number)', checkExperienceQuality(role(['Built an internal tool using Python and React to speed up onboarding.']), []).ok);
+  const required = [{ name: 'Kubernetes', required: true }];
+  const offTopic = checkExperienceQuality([{ role: 'Eng', company: 'A', bullets: ['Wrote unit tests for a billing module using Jest.', 'Fixed minor CSS bugs in the marketing site.'] }], required);
+  ok('Quality gate: flags the most recent role opening with none of the JD\'s required skills', !offTopic.ok && offTopic.issues.some(i => /required skills/.test(i)));
+  const onTopic = checkExperienceQuality([{ role: 'Eng', company: 'A', bullets: ['Ran production Kubernetes clusters for the core platform.'] }], required);
+  ok('Quality gate: passes when the top bullet does name a required skill', onTopic.ok);
 }
 
 console.log(`\n${pass} passed, ${fail} failing`);
